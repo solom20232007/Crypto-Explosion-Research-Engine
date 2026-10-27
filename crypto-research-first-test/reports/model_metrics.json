@@ -1,0 +1,15 @@
+{
+  "model": "HistGradientBoostingClassifier baseline",
+  "target": "future high >= +15% versus current close in next 24 hourly bars",
+  "split": "chronological timestamp split at 2026-07-19T04:00:00+00:00 (about 80% of unique timestamps train / 20% test)",
+  "rows_total": 26208,
+  "rows_train": 20964,
+  "rows_test": 5244,
+  "positive_rate_test": 0.0036231884057971015,
+  "roc_auc": 0.523157894736842,
+  "average_precision": 0.003873598369011213,
+  "precision_at_0_5": 0.0,
+  "recall_at_0_5": 0.0,
+  "brier_score": 0.003622956831186864,
+  "warning": "Prototype baseline only. Overlapping future labels and cross-symbol timestamp split can inflate/complicate results; next iteration must add purged walk-forward validation, threshold selection on validation only, and per-symbol liquidity filters."
+}

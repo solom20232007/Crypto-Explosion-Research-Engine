@@ -1,0 +1,29 @@
+{
+  "model_name": "explosion_baseline",
+  "version": "0.1.0",
+  "trained_at_utc": "2026-10-27T19:26:39.109968+00:00",
+  "feature_columns": [
+    "ret_1h",
+    "ret_3h",
+    "ret_6h",
+    "ret_12h",
+    "ret_24h",
+    "ret_48h",
+    "ret_72h",
+    "rsi_14",
+    "macd",
+    "macd_signal",
+    "macd_hist",
+    "atr_14_pct",
+    "bb_width_20",
+    "bb_position_20",
+    "sma_ratio_20",
+    "sma_ratio_50",
+    "volume_ratio_20",
+    "quote_volume_log",
+    "quote_volume_ratio_20",
+    "volatility_24h"
+  ],
+  "target": "target_future_15pct_24h",
+  "not_for_live_signals": true
+}

@@ -1,1 +1,9 @@
-
+{
+  "symbols_analyzed": 3,
+  "rows": 26280,
+  "explosion_rows": 19,
+  "date_min": "2025-10-01 00:00:00+00:00",
+  "date_max": "2026-09-30 23:00:00+00:00",
+  "definition": "24h close-to-close return >= 15%",
+  "note": "Event rows can overlap; future labels use next 24 hourly highs. Research output only; not trading signals."
+}
