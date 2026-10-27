@@ -1,21 +1,20 @@
 
-from __future__ import annotations
-
-import io
+from datetime import datetime, timezone
+from io import BytesIO, StringIO
+from pathlib import Path
 import time
 import zipfile
-from pathlib import Path
 
 import pandas as pd
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
+RAW_DIR = Path("data/raw")
+REPORT_DIR = Path("reports")
 
-# Binance public market data
-BASE = "https://data.binance.vision/data/spot/monthly/klines"
-KLINES_API = "https://data-api.binance.vision/api/v3/klines"
-EXCHANGE_INFO = "https://data-api.binance.vision/api/v3/exchangeInfo"
+BINANCE_DATA_BASE = (
+    "https://data.binance.vision/data/spot/monthly/klines"
+)
+BINANCE_API_BASE = "https://api.binance.com"
 
 KLINE_COLUMNS = [
     "open_time",
@@ -26,64 +25,32 @@ KLINE_COLUMNS = [
     "volume",
     "close_time",
     "quote_volume",
-    "trades",
-    "taker_buy_base",
-    "taker_buy_quote",
+    "number_of_trades",
+    "taker_buy_base_volume",
+    "taker_buy_quote_volume",
     "ignore",
 ]
 
-NUMERIC_COLUMNS = [
+OUTPUT_COLUMNS = [
+    "open_time",
     "open",
     "high",
     "low",
     "close",
     "volume",
     "quote_volume",
-    "trades",
-    "taker_buy_base",
-    "taker_buy_quote",
-    "ignore",
 ]
 
-# Supported intervals and their approximate lengths.
-INTERVAL_MS = {
-    "1m": 60_000,
-    "3m": 180_000,
-    "5m": 300_000,
-    "15m": 900_000,
-    "30m": 1_800_000,
-    "1h": 3_600_000,
-    "2h": 7_200_000,
-    "4h": 14_400_000,
-    "6h": 21_600_000,
-    "8h": 28_800_000,
-    "12h": 43_200_000,
-    "1d": 86_400_000,
-    "3d": 259_200_000,
-    "1w": 604_800_000,
-}
-
 SESSION = requests.Session()
-SESSION.headers.update(
-    {"User-Agent": "Crypto-Explosion-Research-Engine/0.2"}
-)
-
-retry_strategy = Retry(
-    total=5,
-    connect=5,
-    read=5,
-    backoff_factor=1,
-    status_forcelist=[429, 500, 502, 503, 504],
-    allowed_methods=["GET"],
-    respect_retry_after_header=True,
-)
-
-adapter = HTTPAdapter(max_retries=retry_strategy)
-SESSION.mount("https://", adapter)
+SESSION.headers.update({
+    "User-Agent": "Crypto-Explosion-Research-Engine/1.0"
+})
 
 
-def _utc_timestamp(value) -> pd.Timestamp:
-    """Convert a date or timestamp to UTC."""
+def _utc_timestamp(value=None):
+    if value is None:
+        return pd.Timestamp.now(tz="UTC")
+
     ts = pd.Timestamp(value)
 
     if ts.tzinfo is None:
@@ -92,221 +59,228 @@ def _utc_timestamp(value) -> pd.Timestamp:
     return ts.tz_convert("UTC")
 
 
-def _months(start: str, end: str) -> list[str]:
-    start_period = _utc_timestamp(start).to_period("M")
-    end_period = _utc_timestamp(end).to_period("M")
+def _parse_date(value):
+    return _utc_timestamp(value)
 
-    return [
-        str(period)
-        for period in pd.period_range(
-            start_period,
-            end_period,
-            freq="M",
+
+def _request_with_retries(url, params=None, timeout=30, attempts=4):
+    last_error = None
+
+    for attempt in range(1, attempts + 1):
+        try:
+            response = SESSION.get(
+                url,
+                params=params,
+                timeout=timeout,
+            )
+
+            if response.status_code == 404:
+                return None
+
+            response.raise_for_status()
+            return response
+
+        except requests.RequestException as exc:
+            last_error = exc
+
+            print(
+                f"[WARN] Request attempt {attempt}/{attempts} failed: "
+                f"{url} - {exc}"
+            )
+
+            if attempt < attempts:
+                time.sleep(min(2 ** attempt, 10))
+
+    raise RuntimeError(
+        f"Request failed after {attempts} attempts: {url}. "
+        f"Last error: {last_error}"
+    )
+
+
+def _read_kline_csv(content):
+    """
+    Read either a Binance Vision ZIP payload or CSV bytes.
+    Binance Vision monthly files normally contain no header row.
+    """
+    if not content:
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+    raw_bytes = content
+
+    if raw_bytes[:2] == b"PK":
+        try:
+            with zipfile.ZipFile(BytesIO(raw_bytes)) as archive:
+                csv_names = [
+                    name for name in archive.namelist()
+                    if name.lower().endswith(".csv")
+                ]
+
+                if not csv_names:
+                    raise ValueError(
+                        "ZIP archive does not contain a CSV file."
+                    )
+
+                with archive.open(csv_names[0]) as file:
+                    raw_bytes = file.read()
+
+        except zipfile.BadZipFile as exc:
+            raise ValueError("Downloaded ZIP file is invalid.") from exc
+
+    try:
+        df = pd.read_csv(
+            BytesIO(raw_bytes),
+            header=None,
+            low_memory=False,
         )
-    ]
+    except Exception as exc:
+        raise ValueError(f"Could not parse candle CSV: {exc}") from exc
 
+    if df.empty:
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
 
-def _normalise_timestamp(series: pd.Series) -> pd.Series:
-    """
-    Binance archive timestamps may be in milliseconds or microseconds.
-    Detect the unit from the numeric magnitude.
-    """
-    values = pd.to_numeric(series, errors="coerce")
-    valid = values.dropna()
+    # Binance Vision klines normally have 12 columns.
+    if df.shape[1] < 7:
+        raise ValueError(
+            f"Expected at least 7 kline columns, found {df.shape[1]}."
+        )
 
-    if valid.empty:
-        return pd.to_datetime(values, utc=True, errors="coerce")
+    df = df.iloc[:, :len(KLINE_COLUMNS)].copy()
+    df.columns = KLINE_COLUMNS[:df.shape[1]]
 
-    median = valid.median()
-    unit = "us" if median > 10**14 else "ms"
+    # Support files that unexpectedly include a header row.
+    first_value = str(df.iloc[0]["open_time"]).strip().lower()
 
-    return pd.to_datetime(
-        values,
-        unit=unit,
+    if first_value in {"open_time", "open time", "timestamp"}:
+        df = df.iloc[1:].copy()
+
+    for col in ["open", "high", "low", "close", "volume", "quote_volume"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Binance timestamps are milliseconds since the Unix epoch.
+    df["open_time"] = pd.to_numeric(
+        df["open_time"],
+        errors="coerce",
+    )
+
+    df = df.dropna(
+        subset=[
+            "open_time",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "quote_volume",
+        ]
+    )
+
+    if df.empty:
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+    df["open_time"] = pd.to_datetime(
+        df["open_time"],
+        unit="ms",
         utc=True,
         errors="coerce",
     )
 
-
-def _prepare_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize Binance candle columns and remove invalid rows."""
-    if df.empty:
-        return pd.DataFrame(columns=KLINE_COLUMNS)
-
-    df = df.copy()
-
-    # Archive CSVs normally have 12 columns, but validate safely.
-    if len(df.columns) < 6:
-        return pd.DataFrame(columns=KLINE_COLUMNS)
-
-    df = df.iloc[:, :len(KLINE_COLUMNS)]
-
-    columns = KLINE_COLUMNS[:len(df.columns)]
-    df.columns = columns
-
-    if "open_time" not in df.columns:
-        return pd.DataFrame(columns=KLINE_COLUMNS)
-
-    df["open_time"] = _normalise_timestamp(df["open_time"])
     df = df.dropna(subset=["open_time"])
 
-    for col in NUMERIC_COLUMNS:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    # Ensure the output schema stays consistent even if an archive
-    # contains fewer columns than expected.
-    for col in KLINE_COLUMNS:
-        if col not in df.columns:
-            df[col] = pd.NA
-
-    df = df[KLINE_COLUMNS]
-    df = df.drop_duplicates(subset=["open_time"])
-    df = df.sort_values("open_time")
-
-    return df.reset_index(drop=True)
+    return df[OUTPUT_COLUMNS].reset_index(drop=True)
 
 
-def save_universe(output="data/universe.csv"):
-    """Save currently trading Binance Spot USDT pairs."""
-    response = SESSION.get(EXCHANGE_INFO, timeout=30)
-    response.raise_for_status()
+def _download_month(symbol, interval, year, month):
+    url = (
+        f"{BINANCE_DATA_BASE}/"
+        f"{symbol}/{interval}/"
+        f"{symbol}-{interval}-{year}-{month:02d}.zip"
+    )
 
-    items = response.json().get("symbols", [])
+    response = _request_with_retries(url, timeout=60)
 
-    rows = [
-        {
-            "symbol": item["symbol"],
-            "base_asset": item.get("baseAsset", ""),
-            "quote_asset": item.get("quoteAsset", ""),
-            "status": item.get("status", ""),
-            "is_spot_trading_allowed": item.get(
-                "isSpotTradingAllowed", False
-            ),
-        }
-        for item in items
-        if item.get("quoteAsset") == "USDT"
-        and item.get("status") == "TRADING"
-        and item.get("isSpotTradingAllowed", False)
-    ]
-
-    df = pd.DataFrame(rows)
-
-    if not df.empty:
-        df = df.sort_values("symbol")
-
-    output_path = Path(output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(output_path, index=False)
-
-    print(f"Universe saved: {len(df)} symbols -> {output_path}")
-    return str(output_path)
-
-
-def _download_month(
-    symbol: str,
-    interval: str,
-    month: str,
-) -> pd.DataFrame | None:
-    """Download and parse one monthly Binance archive."""
-    url = f"{BASE}/{symbol}/{interval}/{symbol}-{interval}-{month}.zip"
+    if response is None:
+        print(f"[INFO] Archive not available: {symbol} {year}-{month:02d}")
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
 
     try:
-        response = SESSION.get(url, timeout=60)
-
-        # A missing archive can be normal for a newly listed coin.
-        if response.status_code == 404:
-            return None
-
-        response.raise_for_status()
-
-        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
-            csv_names = [
-                name
-                for name in archive.namelist()
-                if name.lower().endswith(".csv")
-            ]
-
-            if not csv_names:
-                print(f"[WARN] No CSV inside archive: {symbol} {month}")
-                return None
-
-            with archive.open(csv_names[0]) as file:
-                df = pd.read_csv(file, header=None)
-
-        if df.empty:
-            return None
-
-        return _prepare_dataframe(df)
-
-    except (
-        requests.RequestException,
-        zipfile.BadZipFile,
-        ValueError,
-        pd.errors.ParserError,
-    ) as exc:
-        # Do not silently treat a network failure as a successful download.
+        df = _read_kline_csv(response.content)
+    except Exception as exc:
         raise RuntimeError(
-            f"Failed downloading {symbol} {interval} {month}: {exc}"
+            f"Failed to read monthly archive for "
+            f"{symbol} {year}-{month:02d}: {exc}"
         ) from exc
 
-
-def _download_recent_api(
-    symbol: str,
-    interval: str,
-    start_ts: pd.Timestamp,
-    end_ts: pd.Timestamp,
-) -> pd.DataFrame:
-    """
-    Fetch recent candles using Binance API.
-
-    end_ts is exclusive. API requests are paginated so that the function
-    can retrieve more than 1,000 candles when necessary.
-    """
-    if interval not in INTERVAL_MS:
-        raise ValueError(
-            f"Unsupported interval for API pagination: {interval}"
+    if not df.empty:
+        print(
+            f"[OK] {symbol} {year}-{month:02d}: "
+            f"{len(df)} candles downloaded from archive"
         )
 
-    if start_ts >= end_ts:
-        return pd.DataFrame(columns=KLINE_COLUMNS)
+    return df
 
-    interval_ms = INTERVAL_MS[interval]
-    cursor_ms = int(start_ts.timestamp() * 1000)
-    end_ms_exclusive = int(end_ts.timestamp() * 1000)
+
+def _download_api(symbol, interval, start, end):
+    """
+    Retrieve candles from Binance REST API.
+    end is exclusive for the final filtering step.
+    """
+    start_ts = _utc_timestamp(start)
+    end_ts = _utc_timestamp(end)
+
+    if end_ts <= start_ts:
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+    url = f"{BINANCE_API_BASE}/api/v3/klines"
+
+    start_ms = int(start_ts.timestamp() * 1000)
+    end_ms = int(end_ts.timestamp() * 1000)
 
     rows = []
+    cursor_ms = start_ms
+    page_count = 0
 
-    while cursor_ms < end_ms_exclusive:
-        params = {
-            "symbol": symbol,
-            "interval": interval,
-            "startTime": cursor_ms,
-            "endTime": end_ms_exclusive - 1,
-            "limit": 1000,
-        }
-
-        response = SESSION.get(
-            KLINES_API,
-            params=params,
-            timeout=45,
+    while cursor_ms < end_ms:
+        response = _request_with_retries(
+            url,
+            params={
+                "symbol": symbol,
+                "interval": interval,
+                "startTime": cursor_ms,
+                "endTime": end_ms - 1,
+                "limit": 1000,
+            },
+            timeout=30,
         )
-        response.raise_for_status()
 
-        batch = response.json()
+        if response is None:
+            break
+
+        try:
+            batch = response.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Binance API returned invalid JSON for {symbol}: "
+                f"{response.text[:200]}"
+            ) from exc
+
+        if isinstance(batch, dict):
+            raise RuntimeError(
+                f"Binance API error for {symbol}: {batch}"
+            )
 
         if not batch:
             break
 
         rows.extend(batch)
+        page_count += 1
 
         last_open_ms = int(batch[-1][0])
-        next_cursor = last_open_ms + interval_ms
+        next_cursor = last_open_ms + 1
 
-        # Safety guard against a pagination loop.
         if next_cursor <= cursor_ms:
             raise RuntimeError(
-                f"API pagination did not advance for {symbol}."
+                f"Pagination did not advance for {symbol}."
             )
 
         cursor_ms = next_cursor
@@ -314,59 +288,235 @@ def _download_recent_api(
         if len(batch) < 1000:
             break
 
-        time.sleep(0.10)
+        time.sleep(0.15)
 
     if not rows:
-        return pd.DataFrame(columns=KLINE_COLUMNS)
+        print(f"[INFO] API returned no candles for {symbol}")
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
 
     df = pd.DataFrame(rows, columns=KLINE_COLUMNS)
-    df = _prepare_dataframe(df)
 
-    df = df[
-        (df["open_time"] >= start_ts)
-        & (df["open_time"] < end_ts)
-    ]
+    df = _read_api_dataframe(df)
 
-    return df.reset_index(drop=True)
-
-
-def _month_is_complete(
-    existing: pd.DataFrame,
-    month_start: pd.Timestamp,
-    month_end: pd.Timestamp,
-    required_start: pd.Timestamp,
-    required_end: pd.Timestamp,
-    interval_ms: int,
-) -> bool:
-    """Check whether saved candles adequately cover the requested period."""
-    if existing.empty:
-        return False
-
-    month_data = existing.loc[
-        (existing["open_time"] >= required_start)
-        & (existing["open_time"] < required_end),
-        "open_time",
-    ]
-
-    if month_data.empty:
-        return False
-
-    interval = pd.Timedelta(milliseconds=interval_ms)
-
-    # A partial month, a newly listed symbol, or a missing section
-    # should be downloaded again instead of being skipped.
-    if month_data.min() > required_start + interval:
-        return False
-
-    if month_data.max() < required_end - 2 * interval:
-        return False
-
-    expected = max(
-        1,
-        int((required_end - required_start) / interval),
+    print(
+        f"[OK] {symbol}: {len(df)} candles downloaded from API "
+        f"across {page_count} page(s)"
     )
 
-    return len(month_data) >= expected * 0.95
+    return df
+
+
+def _read_api_dataframe(df):
+    df = df.copy()
+
+    df["open_time"] = pd.to_numeric(
+        df["open_time"],
+        errors="coerce",
+    )
+
+    for col in ["open", "high", "low", "close", "volume", "quote_volume"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    df = df.dropna(
+        subset=[
+            "open_time",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "quote_volume",
+        ]
+    )
+
+    df["open_time"] = pd.to_datetime(
+        df["open_time"],
+        unit="ms",
+        utc=True,
+        errors="coerce",
+    )
+
+    return df.dropna(subset=["open_time"])[OUTPUT_COLUMNS].reset_index(
+        drop=True
+    )
+
+
+def _month_range(start, end):
+    start_ts = _utc_timestamp(start)
+    end_ts = _utc_timestamp(end)
+
+    if end_ts <= start_ts:
+        return []
+
+    # Use timezone-naive month periods to avoid timezone warnings.
+    start_period = start_ts.tz_localize(None).to_period("M")
+    end_period = end_ts.tz_localize(None).to_period("M")
+
+    return list(
+        pd.period_range(start_period, end_period, freq="M")
+    )
+
+
+def _load_existing(path):
+    if not path.exists():
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+    try:
+        df = pd.read_csv(path)
+        df.columns = df.columns.astype(str).str.strip()
+
+        missing = set(OUTPUT_COLUMNS) - set(df.columns)
+
+        if missing:
+            print(
+                f"[WARN] Existing file {path} is missing columns "
+                f"{sorted(missing)}; it will not be used."
+            )
+            return pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+        df = df[OUTPUT_COLUMNS].copy()
+        df["open_time"] = pd.to_datetime(
+            df["open_time"],
+            utc=True,
+            errors="coerce",
+        )
+
+        for col in ["open", "high", "low", "close", "volume", "quote_volume"]:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        return df.dropna(
+            subset=["open_time", "open", "high", "low", "close"]
+        )
+
+    except Exception as exc:
+        print(f"[WARN] Could not read existing file {path}: {exc}")
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+
+def _collect_one(symbol, interval, start, end):
+    start_ts = _utc_timestamp(start)
+    end_ts = _utc_timestamp(end)
+
+    if end_ts <= start_ts:
+        raise ValueError(
+            f"Invalid date range for {symbol}: end must be after start."
+        )
+
+    RAW_DIR.mkdir(parents=True, exist_ok=True)
+
+    output_path = RAW_DIR / f"{symbol}_{interval}.csv"
+    existing = _load_existing(output_path)
+
+    print(f"\nCollecting {symbol} ({interval})")
+    print(f"Start UTC: {start_ts}")
+    print(f"End UTC (exclusive): {end_ts}")
+    print(f"Existing rows: {len(existing)}")
+
+    downloaded_frames = []
+    months = _month_range(start_ts, end_ts)
+    current_period = pd.Timestamp.now(tz="UTC").tz_localize(None).to_period("M")
+
+    for period in months:
+        month_start = period.start_time.tz_localize("UTC")
+        month_end = (period + 1).start_time.tz_localize("UTC")
+
+        clipped_start = max(start_ts, month_start)
+        clipped_end = min(end_ts, month_end)
+
+        # Use the REST API for the current month; monthly archives may
+        # not yet contain the most recent candles.
+        if period == current_period:
+            frame = _download_api(
+                symbol,
+                interval,
+                clipped_start,
+                clipped_end,
+            )
+        else:
+            try:
+                frame = _download_month(
+                    symbol,
+                    interval,
+                    period.year,
+                    period.month,
+                )
+            except Exception as exc:
+                print(
+                    f"[WARN] Archive failed for {symbol} "
+                    f"{period}: {exc}"
+                )
+
+                # Fall back to the API for this month if archive retrieval
+                # fails, so a failed archive does not silently lose data.
+                frame = _download_api(
+                    symbol,
+                    interval,
+                    clipped_start,
+                    clipped_end,
+                )
+
+        if not frame.empty:
+            downloaded_frames.append(frame)
+
+    if downloaded_frames:
+        downloaded = pd.concat(downloaded_frames, ignore_index=True)
+    else:
+        downloaded = pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+    if not downloaded.empty:
+        downloaded["open_time"] = pd.to_datetime(
+            downloaded["open_time"],
+            utc=True,
+            errors="coerce",
+        )
+
+    # Keep only the requested time range.
+    if not downloaded.empty:
+        downloaded = downloaded[
+            (downloaded["open_time"] >= start_ts)
+            & (downloaded["open_time"] < end_ts)
+        ]
+
+    if existing.empty and downloaded.empty:
+        raise RuntimeError(
+            f"No candle data was downloaded for {symbol}. "
+            "Check Binance connectivity, symbol validity, and download logs."
+        )
+
+    combined = pd.concat(
+        [existing, downloaded],
+        ignore_index=True,
+    )
+
+    combined["open_time"] = pd.to_datetime(
+        combined["open_time"],
+        utc=True,
+        errors="coerce",
+    )
+
+    combined = (
+        combined.dropna(subset=["open_time"])
+        .drop_duplicates(subset=["open_time"], keep="last")
+        .sort_values("open_time")
+        .reset_index(drop=True)
+    )
+
+    # Retain the full requested window rather than accidentally
+    # truncating previously collected history.
+    combined.to_csv(output_path, index=False)
+
+    print(
+        f"[SAVED] {symbol}: {len(combined)} total rows -> {output_path}"
+    )
+
+    if not combined.empty:
+        print(
+            f"[RANGE] {symbol}: "
+            f"{combined['open_time'].min()} to "
+            f"{combined['open_time'].max()}"
+        )
+
+    return output_path
 
 
 def collect_symbols(
@@ -375,222 +525,88 @@ def collect_symbols(
     start="2023-10-01",
     end=None,
 ):
-    """
-    Initial backfill plus incremental collection.
-
-    - Downloads historical closed months from Binance archives.
-    - Skips historical months that already have adequate coverage.
-    - Refreshes the current month through Binance's klines API.
-    - Merges old and new candles without duplicate open_time values.
-    - Never stores candles later than the requested end/current time.
-
-    The end date is inclusive when passed as a date string.
-    """
     if not symbols:
-        raise ValueError("No symbols supplied to collect_symbols().")
-
-    if interval not in INTERVAL_MS:
-        raise ValueError(
-            f"Unsupported interval: {interval}. "
-            f"Supported: {', '.join(INTERVAL_MS)}"
-        )
-
-    raw_dir = Path("data/raw")
-    raw_dir.mkdir(parents=True, exist_ok=True)
-
-    start_ts = _utc_timestamp(start)
-    now = pd.Timestamp.now(tz="UTC")
+        raise ValueError("At least one symbol is required.")
 
     if end is None:
-        end_ts = now
-    else:
-        requested_end = _utc_timestamp(end)
+        end = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-        # A date-only end is inclusive through that UTC day.
-        if len(str(end).strip()) == 10:
-            requested_end += pd.Timedelta(days=1)
+    RAW_DIR.mkdir(parents=True, exist_ok=True)
 
-        end_ts = min(requested_end, now)
+    start_ts = _utc_timestamp(start)
+    end_ts = _utc_timestamp(end)
 
-    if start_ts >= end_ts:
-        raise ValueError(
-            f"Invalid date range: start={start_ts}, end={end_ts}"
-        )
-
-    interval_ms = INTERVAL_MS[interval]
-    interval_delta = pd.Timedelta(milliseconds=interval_ms)
-
-    months = _months(
-        start_ts.strftime("%Y-%m-%d"),
-        end_ts.strftime("%Y-%m-%d"),
-    )
-
-    current_month = now.strftime("%Y-%m")
+    if end_ts <= start_ts:
+        raise ValueError("--end must be later than --start.")
 
     print(f"Interval: {interval}")
     print(f"Start UTC: {start_ts}")
     print(f"End UTC (exclusive): {end_ts}")
-    print(f"Months to inspect: {len(months)}")
+    print(f"Months to inspect: {len(_month_range(start_ts, end_ts))}")
     print(f"Symbols: {len(symbols)}")
 
-    failures = []
+    errors = []
 
     for index, symbol in enumerate(symbols, start=1):
-        symbol = str(symbol).strip().upper()
+        print(f"\n[{index}/{len(symbols)}] {symbol}")
 
-        if not symbol:
-            continue
-
-        output = raw_dir / f"{symbol}_{interval}.csv"
-
-        if output.exists():
-            try:
-                existing = pd.read_csv(output)
-                existing = _prepare_dataframe(existing)
-            except Exception as exc:
-                raise RuntimeError(
-                    f"Could not read existing file {output}: {exc}"
-                ) from exc
-        else:
-            existing = pd.DataFrame(columns=KLINE_COLUMNS)
-
-        chunks = []
-        downloaded_rows = 0
-        missing_archives = 0
-
-        print(
-            f"\n[{index}/{len(symbols)}] {symbol}: "
-            f"existing rows={len(existing)}"
-        )
-
-        for month in months:
-            month_start = pd.Timestamp(
-                f"{month}-01",
-                tz="UTC",
+        try:
+            _collect_one(
+                symbol=symbol.upper(),
+                interval=interval,
+                start=start_ts,
+                end=end_ts,
             )
-            month_end = month_start + pd.offsets.MonthBegin(1)
+        except Exception as exc:
+            message = f"{symbol}: {type(exc).__name__}: {exc}"
+            errors.append(message)
+            print(f"[ERROR] {message}")
 
-            required_start = max(start_ts, month_start)
-            required_end = min(end_ts, month_end)
-
-            if required_start >= required_end:
-                continue
-
-            # Current month is always refreshed from the API.
-            # This avoids relying on an archive that may not be ready yet.
-            if month == current_month:
-                continue
-
-            if _month_is_complete(
-                existing=existing,
-                month_start=month_start,
-                month_end=month_end,
-                required_start=required_start,
-                required_end=required_end,
-                interval_ms=interval_ms,
-            ):
-                continue
-
-            try:
-                month_df = _download_month(symbol, interval, month)
-            except Exception as exc:
-                failures.append(str(exc))
-                print(f"[ERROR] {exc}")
-                continue
-
-            if month_df is None or month_df.empty:
-                missing_archives += 1
-                continue
-
-            month_df = month_df[
-                (month_df["open_time"] >= required_start)
-                & (month_df["open_time"] < required_end)
-            ]
-
-            if not month_df.empty:
-                chunks.append(month_df)
-                downloaded_rows += len(month_df)
-
-            time.sleep(0.12)
-
-        # Fetch the entire requested portion of the current month.
-        # Usually this is at most a few hundred hourly candles.
-        current_month_start = pd.Timestamp(
-            f"{current_month}-01",
-            tz="UTC",
-        )
-        recent_start = max(start_ts, current_month_start)
-        recent_end = min(end_ts, now)
-
-        if recent_start < recent_end:
-            try:
-                recent_df = _download_recent_api(
-                    symbol=symbol,
-                    interval=interval,
-                    start_ts=recent_start,
-                    end_ts=recent_end,
-                )
-
-                if not recent_df.empty:
-                    chunks.append(recent_df)
-                    downloaded_rows += len(recent_df)
-
-            except Exception as exc:
-                failures.append(
-                    f"{symbol} recent API data: {exc}"
-                )
-                print(
-                    f"[ERROR] Could not refresh recent data "
-                    f"for {symbol}: {exc}"
-                )
-
-        if not existing.empty:
-            chunks.insert(0, existing)
-
-        if not chunks:
-            print(
-                f"[WARN] {symbol}: no usable data available. "
-                f"Missing archives encountered: {missing_archives}"
-            )
-            continue
-
-        combined = pd.concat(chunks, ignore_index=True)
-        combined = _prepare_dataframe(combined)
-
-        combined = combined[
-            (combined["open_time"] >= start_ts)
-            & (combined["open_time"] < end_ts)
-        ]
-
-        combined = (
-            combined.drop_duplicates(subset=["open_time"], keep="last")
-            .sort_values("open_time")
-            .reset_index(drop=True)
+    if errors:
+        raise RuntimeError(
+            "Collection failed for one or more symbols:\n"
+            + "\n".join(errors)
         )
 
-        # Do not replace a valid saved file with an empty result.
-        if combined.empty:
-            print(f"[WARN] {symbol}: merged data is empty; old file retained.")
-            continue
+    print("\nCollection completed successfully.")
 
-        combined.to_csv(output, index=False)
 
-        latest = combined["open_time"].max()
+def save_universe():
+    """
+    Save Binance Spot USDT trading symbols to data/universe.csv.
+    """
+    url = f"{BINANCE_API_BASE}/api/v3/exchangeInfo"
 
-        print(
-            f"[OK] {symbol}: saved {len(combined)} rows; "
-            f"{downloaded_rows} rows fetched; "
-            f"latest={latest}; "
-            f"missing monthly archives={missing_archives}; "
-            f"file={output}"
+    response = _request_with_retries(url, timeout=30)
+
+    if response is None:
+        raise RuntimeError("Binance exchangeInfo endpoint returned 404.")
+
+    payload = response.json()
+
+    symbols = []
+
+    for item in payload.get("symbols", []):
+        if (
+            item.get("status") == "TRADING"
+            and item.get("quoteAsset") == "USDT"
+            and item.get("isSpotTradingAllowed", True)
+        ):
+            symbols.append(item["symbol"])
+
+    if not symbols:
+        raise RuntimeError(
+            "Binance returned no active Spot USDT symbols."
         )
 
-    if failures:
-        message = (
-            f"Collection finished with {len(failures)} error(s). "
-            "Some symbols or months may be incomplete. "
-            "Check the ERROR lines above before trusting the research results."
-        )
-        raise RuntimeError(message)
+    path = Path("data/universe.csv")
+    path.parent.mkdir(parents=True, exist_ok=True)
 
-    print("\nCollection completed without reported download errors.")
+    pd.DataFrame({"symbol": sorted(set(symbols))}).to_csv(
+        path,
+        index=False,
+    )
+
+    print(f"Saved {len(symbols)} symbols to {path}")
+
+    return path
