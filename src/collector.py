@@ -220,6 +220,31 @@ def _download_month(symbol, interval, year, month):
     return df
 
 
+def _download_day(symbol, interval, day):
+    day = pd.Timestamp(day).strftime("%Y-%m-%d")
+
+    url = (
+        f"https://data.binance.vision/data/spot/daily/klines/"
+        f"{symbol}/{interval}/"
+        f"{symbol}-{interval}-{day}.zip"
+    )
+
+    response = _request_with_retries(url, timeout=60)
+
+    if response is None:
+        print(f"[INFO] Daily archive not available: {symbol} {day}")
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+    df = _read_kline_csv(response.content)
+
+    if not df.empty:
+        print(
+            f"[OK] {symbol} {day}: "
+            f"{len(df)} candles downloaded from daily archive"
+        )
+
+    return df
+
 def _download_api(symbol, interval, start, end):
     """
     Retrieve candles from Binance REST API.
@@ -329,12 +354,36 @@ def _read_api_dataframe(df):
         ]
     )
 
-    df["open_time"] = pd.to_datetime(
-        df["open_time"],
-        unit="ms",
-        utc=True,
-        errors="coerce",
-    )
+
+timestamps = pd.to_numeric(df["open_time"], errors="coerce")
+
+valid_timestamps = timestamps.dropna()
+
+if valid_timestamps.empty:
+    return pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+# Binance Spot archive timestamps changed to microseconds in 2025.
+unit = "us" if valid_timestamps.abs().median() >= 1e14 else "ms"
+
+
+timestamps = pd.to_numeric(df["open_time"], errors="coerce")
+
+valid_timestamps = timestamps.dropna()
+
+if valid_timestamps.empty:
+    return pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+# Binance Spot archive timestamps changed to microseconds in 2025.
+unit = "us" if valid_timestamps.abs().median() >= 1e14 else "ms"
+
+df["open_time"] = pd.to_datetime(
+    timestamps,
+    unit=unit,
+    utc=True,
+    errors="coerce",
+)
+
+
 
     return df.dropna(subset=["open_time"])[OUTPUT_COLUMNS].reset_index(
         drop=True
@@ -425,26 +474,52 @@ def _collect_one(symbol, interval, start, end):
 
         # Use the REST API for the current month; monthly archives may
         # not yet contain the most recent candles.
-        if period == current_period:
-            frame = _download_api(
+
+if period == current_period:
+    # Use daily public archives instead of the blocked REST API.
+    day_start = clipped_start.normalize()
+    while day_start < clipped_end:
+        day_end = day_start + pd.Timedelta(days=1)
+
+        if day_start >= clipped_end:
+            break
+
+        try:
+            frame = _download_day(
                 symbol,
                 interval,
-                clipped_start,
-                clipped_end,
+                day_start,
             )
-        else:
-            try:
-                frame = _download_month(
-                    symbol,
-                    interval,
-                    period.year,
-                    period.month,
-                )
-            except Exception as exc:
-                print(
-                    f"[WARN] Archive failed for {symbol} "
-                    f"{period}: {exc}"
-                )
+        except Exception as exc:
+            print(
+                f"[WARN] Daily archive failed for "
+                f"{symbol} {day_start:%Y-%m-%d}: {exc}"
+            )
+            frame = pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+        if not frame.empty:
+            downloaded_frames.append(frame)
+
+        day_start = day_end
+
+else:
+    try:
+        frame = _download_month(
+            symbol,
+            interval,
+            period.year,
+            period.month,
+        )
+    except Exception as exc:
+        print(
+            f"[WARN] Archive failed for {symbol} "
+            f"{period}: {exc}"
+        )
+        frame = pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+    if not frame.empty:
+        downloaded_frames.append(frame)
+
 
                 # Fall back to the API for this month if archive retrieval
                 # fails, so a failed archive does not silently lose data.
