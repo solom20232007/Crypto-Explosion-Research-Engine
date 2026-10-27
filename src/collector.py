@@ -385,10 +385,9 @@ df["open_time"] = pd.to_datetime(
 
 
 
-    return df.dropna(subset=["open_time"])[OUTPUT_COLUMNS].reset_index(
-        drop=True
-    )
-
+ return df.dropna(subset=["open_time"])[OUTPUT_COLUMNS].reset_index(
+    drop=True
+)
 
 def _month_range(start, end):
     start_ts = _utc_timestamp(start)
