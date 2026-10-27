@@ -38,6 +38,23 @@ jobs:
             --interval 1h \
             --start 2025-10-01 \
             --end "$(date -u +%F)"
+      
+      - name: Audit historical data quality
+        run: >
+          python -m src.quality_audit
+          --symbols BTCUSDT ETHUSDT SOLUSDT
+          --interval 1h
+
+      - name: Save data quality report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-quality-audit
+          path: |
+            reports/data_quality_report.csv
+            reports/data_quality_report.md
+          if-no-files-found: warn
+
 
       - name: Analyze historical explosions
         run: |
