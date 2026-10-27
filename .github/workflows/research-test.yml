@@ -47,6 +47,12 @@ jobs:
       - name: Train baseline model
         run: python main.py train
 
+      - name: Upload research data to Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python main.py upload
+
       - name: Save research results
         if: always()
         uses: actions/upload-artifact@v4
