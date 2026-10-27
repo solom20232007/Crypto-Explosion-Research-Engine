@@ -1,0 +1,19 @@
+project:
+  name: Crypto-Explosion-Research-Engine
+  timezone: UTC
+data:
+  start_date: "2023-10-01"
+  end_date: "2026-10-27"
+  interval: "1h"
+  quote_asset: "USDT"
+  raw_dir: "data/raw"
+  universe_file: "data/universe.csv"
+  features_file: "data/features.csv"
+research:
+  explosion_threshold: 0.15
+  discovery_window_hours: 24
+  prediction_horizon_hours: 24
+  min_quote_volume_usdt: 100000
+  train_fraction: 0.70
+  validation_fraction: 0.15
+  random_seed: 42
