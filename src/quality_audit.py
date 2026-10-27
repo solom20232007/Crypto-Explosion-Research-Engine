@@ -28,11 +28,14 @@ NUMERIC_COLUMNS = [
 
 def parse_timestamps(series: pd.Series) -> pd.Series:
     """Parse ISO dates or Unix timestamps in milliseconds/microseconds."""
+    original = series
     numeric = pd.to_numeric(series, errors="coerce")
     non_null = numeric.dropna()
+    original_non_null = original.dropna()
 
-    if len(non_null) > 0 and len(non_null) >= max(
-        1, int(len(series.dropna()) * 0.8)
+    if (
+        not non_null.empty
+        and len(non_null) >= max(1, int(len(original_non_null) * 0.8))
     ):
         median = non_null.abs().median()
 
@@ -54,14 +57,14 @@ def parse_timestamps(series: pd.Series) -> pd.Series:
             )
 
     return pd.to_datetime(
-        series,
+        original,
         utc=True,
         errors="coerce",
     )
 
 
 def audit_file(path: Path, interval: str) -> dict:
-    """Inspect one candle CSV and return a compact quality report."""
+    """Inspect one candle CSV and return a quality report."""
     result = {
         "file": str(path),
         "symbol": path.name.split("_")[0],
@@ -95,7 +98,8 @@ def audit_file(path: Path, interval: str) -> dict:
     result["rows"] = len(df)
 
     missing_columns = [
-        column for column in REQUIRED_COLUMNS
+        column
+        for column in REQUIRED_COLUMNS
         if column not in df.columns
     ]
 
@@ -126,7 +130,8 @@ def audit_file(path: Path, interval: str) -> dict:
             )
 
     value_columns = [
-        column for column in REQUIRED_COLUMNS
+        column
+        for column in REQUIRED_COLUMNS
         if column != "open_time"
     ]
 
@@ -156,38 +161,48 @@ def audit_file(path: Path, interval: str) -> dict:
 
     result["valid_rows"] = len(complete)
 
-    # OHLC consistency checks:
-    # prices must be positive, high must be the maximum,
-    # and low must be the minimum of the candle.
-    invalid_ohlc = (
-        (complete["open"] <= 0)
-        | (complete["high"] <= 0)
-        | (complete["low"] <= 0)
-        | (complete["close"] <= 0)
-        | (complete["high"] < complete["low"])
-        | (
-            complete["high"]
-            < complete[["open", "close"]].max(axis=1)
+    if not complete.empty:
+        invalid_ohlc = (
+            (complete["open"] <= 0)
+            | (complete["high"] <= 0)
+            | (complete["low"] <= 0)
+            | (complete["close"] <= 0)
+            | (complete["high"] < complete["low"])
+            | (
+                complete["high"]
+                < complete[["open", "close"]].max(axis=1)
+            )
+            | (
+                complete["low"]
+                > complete[["open", "close"]].min(axis=1)
+            )
         )
-        | (
-            complete["low"]
-            > complete[["open", "close"]].min(axis=1)
+
+        result["invalid_ohlc_rows"] = int(
+            invalid_ohlc.sum()
         )
-    )
 
-    result["invalid_ohlc_rows"] = int(invalid_ohlc.sum())
+        result["negative_volume_rows"] = int(
+            (complete["volume"] < 0).sum()
+        )
 
-    result["negative_volume_rows"] = int(
-        (complete["volume"] < 0).sum()
-    )
+    try:
+        interval_delta = pd.Timedelta(interval)
+    except (ValueError, TypeError):
+        result["findings"] = (
+            f"Unsupported interval format: {interval}"
+        )
+        return result
 
-    interval_delta = pd.Timedelta(interval)
+    if interval_delta <= pd.Timedelta(0):
+        result["findings"] = (
+            f"Interval must be positive: {interval}"
+        )
+        return result
 
     if len(valid_time) >= 2:
         differences = valid_time["open_time"].diff().dropna()
 
-        # Allow small timestamp irregularities, but count gaps
-        # larger than one candle interval.
         gap_differences = differences[
             differences > interval_delta * 1.5
         ]
@@ -196,7 +211,12 @@ def audit_file(path: Path, interval: str) -> dict:
 
         missing_estimate = (
             gap_differences / interval_delta
-        ).apply(lambda value: max(0, int(round(value)) - 1))
+        ).apply(
+            lambda value: max(
+                0,
+                int(round(value)) - 1,
+            )
+        )
 
         result["estimated_missing_candles"] = int(
             missing_estimate.sum()
@@ -229,12 +249,64 @@ def audit_file(path: Path, interval: str) -> dict:
         findings.append("time gaps detected")
 
     result["status"] = "REVIEW" if findings else "PASS"
-    result["findings"] = "; ".join(findings) if findings else "No issues detected"
+    result["findings"] = (
+        "; ".join(findings)
+        if findings
+        else "No issues detected"
+    )
 
     return result
 
 
-def main():
+def write_markdown_report(
+    report: pd.DataFrame,
+    output_path: Path,
+    interval: str,
+) -> None:
+    """Write a Markdown report without optional dependencies."""
+    columns = [
+        "symbol",
+        "status",
+        "rows",
+        "valid_rows",
+        "first_candle_utc",
+        "last_candle_utc",
+        "duplicate_timestamps",
+        "invalid_timestamps",
+        "missing_values",
+        "invalid_ohlc_rows",
+        "negative_volume_rows",
+        "gap_count",
+        "estimated_missing_candles",
+        "largest_gap_hours",
+        "findings",
+    ]
+
+    summary = report[columns]
+
+    with output_path.open("w", encoding="utf-8") as file:
+        file.write("# Historical Data Quality Audit\n\n")
+        file.write(f"- Interval: `{interval}`\n")
+        file.write(f"- Files checked: {len(report)}\n")
+        file.write(
+            f"- Passed: {(report['status'] == 'PASS').sum()}\n"
+        )
+        file.write(
+            f"- Needs review: "
+            f"{(report['status'] == 'REVIEW').sum()}\n"
+        )
+        file.write(
+            f"- Errors: {(report['status'] == 'ERROR').sum()}\n\n"
+        )
+
+        # Use plain text instead of DataFrame.to_markdown(),
+        # which requires the optional 'tabulate' package.
+        file.write("```text\n")
+        file.write(summary.to_string(index=False))
+        file.write("\n```\n")
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Audit historical crypto candle data quality."
     )
@@ -298,6 +370,12 @@ def main():
 
     report.to_csv(csv_path, index=False)
 
+    write_markdown_report(
+        report=report,
+        output_path=md_path,
+        interval=args.interval,
+    )
+
     summary_columns = [
         "symbol",
         "status",
@@ -316,26 +394,8 @@ def main():
         "findings",
     ]
 
-    summary = report[summary_columns]
-
-    with md_path.open("w", encoding="utf-8") as file:
-        file.write("# Historical Data Quality Audit\n\n")
-        file.write(f"- Interval: `{args.interval}`\n")
-        file.write(f"- Files checked: {len(report)}\n")
-        file.write(
-            f"- Passed: {(report['status'] == 'PASS').sum()}\n"
-        )
-        file.write(
-            f"- Needs review: {(report['status'] == 'REVIEW').sum()}\n"
-        )
-        file.write(
-            f"- Errors: {(report['status'] == 'ERROR').sum()}\n\n"
-        )
-        file.write(summary.to_markdown(index=False))
-        file.write("\n")
-
     print("\n========== DATA QUALITY AUDIT ==========")
-    print(summary.to_string(index=False))
+    print(report[summary_columns].to_string(index=False))
     print(f"\nCSV report: {csv_path}")
     print(f"Markdown report: {md_path}")
 
