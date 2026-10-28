@@ -335,6 +335,11 @@ def analyze_symbols(symbols=None):
             "Any high in the next 24 bars reaches >= 15% "
             "above the current close"
         ),
+        "technical_feature_columns": int(len(result.columns)),
+        "breakout_phase_rows": {
+            str(phase): int(count)
+            for phase, count in result["breakout_phase"].value_counts(dropna=False).items()
+        },
         "failed_files": failed_files,
         "note": (
             "Research output only; not trading signals. "
