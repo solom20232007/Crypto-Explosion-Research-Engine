@@ -22,3 +22,21 @@ def test_feature_builder_emits_every_prebreakout_model_feature():
     assert not missing, f"Missing advisor feature columns: {missing}"
     assert {"timestamp", "symbol", "close", "high"}.issubset(features.columns)
     assert features["timestamp"].is_monotonic_increasing
+
+
+def test_feature_builder_parses_binance_epoch_milliseconds():
+    count = 100
+    close = 10 + np.arange(count, dtype=float) * 0.01
+    times = pd.date_range("2025-03-01", periods=count, freq="h", tz="UTC")
+    frame = pd.DataFrame({
+        "open_time": times.astype("int64") // 10**6,
+        "open": close,
+        "high": close * 1.01,
+        "low": close * 0.99,
+        "close": close,
+        "volume": np.full(count, 1000.0),
+        "quote_volume": np.full(count, 10000.0),
+    })
+    features = build_features(frame, "TESTUSDT")
+    assert features["timestamp"].min() == times[0]
+    assert features["timestamp"].max() == times[-1]
