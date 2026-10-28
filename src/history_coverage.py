@@ -32,7 +32,16 @@ def audit_history(start: str = DEFAULT_START, end: str = DEFAULT_END,
     for path in files:
         try:
             df = pd.read_csv(path, usecols=["open_time"])
-            timestamps = pd.to_datetime(df["open_time"], utc=True, errors="coerce").dropna()
+            raw_open_time = df["open_time"]
+            numeric_open_time = pd.to_numeric(raw_open_time, errors="coerce")
+            if numeric_open_time.notna().mean() >= 0.95:
+                timestamps = pd.to_datetime(
+                    numeric_open_time, unit="ms", utc=True, errors="coerce"
+                ).dropna()
+            else:
+                timestamps = pd.to_datetime(
+                    raw_open_time, utc=True, errors="coerce"
+                ).dropna()
             timestamps = timestamps.drop_duplicates().sort_values()
             if timestamps.empty:
                 rows.append({
