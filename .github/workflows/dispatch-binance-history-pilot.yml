@@ -15,22 +15,65 @@ on:
         type: string
 
 permissions:
-  actions: write
   contents: read
 
 jobs:
-  dispatch:
+  collect-and-upload:
     runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
     steps:
-      - name: Trigger research-branch collection workflow
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          START_DATE: ${{ inputs.start }}
-          END_DATE: ${{ inputs.end }}
+      - name: Checkout research branch only
+        uses: actions/checkout@v4
+        with:
+          ref: research/binance-prebreakout-advisor-v1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
         run: |
-          gh workflow run collect-binance-history.yml \
-            --repo "$REPO" \
-            --ref research/binance-prebreakout-advisor-v1 \
-            -f start="$START_DATE" \
-            -f end="$END_DATE"
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          test -n "$SUPABASE_URL" || (echo "Missing SUPABASE_URL Actions secret" && exit 1)
+          test -n "$SUPABASE_SECRET_KEY" || (echo "Missing SUPABASE_SECRET_KEY Actions secret" && exit 1)
+
+      - name: Define pilot universe
+        run: |
+          mkdir -p data/raw
+          printf "BTCUSDT\nETHUSDT\nSOLUSDT\n" > data/research_symbols.txt
+
+      - name: Collect Binance Spot 1h history
+        run: |
+          python main.py collect-history \
+            --start "${{ inputs.start }}" \
+            --end "${{ inputs.end }}" \
+            --symbols-file data/research_symbols.txt
+
+      - name: Audit local historical coverage
+        run: python main.py audit-history
+
+      - name: Upsert candles into existing Supabase table
+        run: python -m src.supabase_candle_uploader
+
+      - name: Upload collection and audit reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: binance-history-pilot-reports
+          path: |
+            reports/
+            data/raw/BTCUSDT_1h.csv
+            data/raw/ETHUSDT_1h.csv
+            data/raw/SOLUSDT_1h.csv
+          if-no-files-found: warn
+          retention-days: 14
