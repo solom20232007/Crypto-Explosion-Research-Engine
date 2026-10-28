@@ -17,9 +17,12 @@ from typing import Iterable
 import pandas as pd
 import requests
 
-BASE_URL = "https://api.binance.com"
-KLINES_URL = f"{BASE_URL}/api/v3/klines"
-EXCHANGE_INFO_URL = f"{BASE_URL}/api/v3/exchangeInfo"
+BASE_URLS = [
+    "https://data-api.binance.vision",  # Same public API host used by V7 as primary.
+    "https://api.binance.com",
+]
+KLINES_PATH = "/api/v3/klines"
+EXCHANGE_INFO_PATH = "/api/v3/exchangeInfo"
 LIMIT = 1000
 COLUMNS = [
     "open_time", "open", "high", "low", "close", "volume", "close_time",
@@ -28,29 +31,47 @@ COLUMNS = [
 ]
 
 
-def _request_json(url: str, params: dict | None = None, retries: int = 7):
+def _request_json(path: str, params: dict | None = None, retries: int = 4):
+    """Request public Binance data, trying the same alternate API host as V7."""
     session = requests.Session()
-    for attempt in range(retries):
-        try:
-            response = session.get(url, params=params, timeout=30)
-            if response.status_code in (418, 429):
-                wait = int(response.headers.get("Retry-After", min(60, 2 ** attempt)))
-                time.sleep(max(wait, 1))
-                continue
-            if response.status_code >= 500:
-                time.sleep(min(30, 2 ** attempt))
-                continue
-            response.raise_for_status()
-            return response.json()
-        except (requests.RequestException, ValueError):
-            if attempt == retries - 1:
-                raise
-            time.sleep(min(30, 2 ** attempt))
-    raise RuntimeError(f"Request failed after {retries} attempts: {url}")
+    last_error = None
+    for base_url in BASE_URLS:
+        url = f"{base_url}{path}"
+        for attempt in range(retries):
+            try:
+                response = session.get(url, params=params, timeout=30)
+                # A 451 is a host/access restriction; move to the next host immediately.
+                if response.status_code == 451:
+                    last_error = requests.HTTPError(
+                        f"HTTP 451 from {base_url}; trying alternate Binance API host",
+                        response=response,
+                    )
+                    break
+                if response.status_code in (418, 429):
+                    wait = int(response.headers.get("Retry-After", min(60, 2 ** attempt)))
+                    time.sleep(max(wait, 1))
+                    continue
+                if response.status_code >= 500:
+                    last_error = requests.HTTPError(
+                        f"HTTP {response.status_code} from {base_url}", response=response
+                    )
+                    time.sleep(min(30, 2 ** attempt))
+                    continue
+                response.raise_for_status()
+                return response.json()
+            except (requests.RequestException, ValueError) as exc:
+                last_error = exc
+                if isinstance(exc, requests.HTTPError) and exc.response is not None:
+                    if exc.response.status_code == 451:
+                        break
+                if attempt < retries - 1:
+                    time.sleep(min(30, 2 ** attempt))
+        # Continue with the alternate host if this host failed.
+    raise last_error or RuntimeError("No Binance API host returned data")
 
 
 def discover_active_usdt_spot_symbols() -> list[str]:
-    payload = _request_json(EXCHANGE_INFO_URL)
+    payload = _request_json(EXCHANGE_INFO_PATH)
     symbols = []
     for item in payload.get("symbols", []):
         if (item.get("status") == "TRADING"
@@ -101,7 +122,7 @@ def download_symbol(symbol: str, start_ms: int, end_ms: int, out_dir: Path,
     pages = 0
     fetched = 0
     while cursor < end_ms:
-        payload = _request_json(KLINES_URL, {
+        payload = _request_json(KLINES_PATH, {
             "symbol": symbol, "interval": "1h", "startTime": cursor,
             "endTime": end_ms - 1, "limit": LIMIT,
         })
