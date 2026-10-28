@@ -1,10 +1,11 @@
 # Binance Pre-Breakout Advisor — implementation plan
 
 ## Goal
-Research which Binance Spot USDT pairs are likely to become top gainers over the next 4, 12, and 24 hours, before the move happens. The output is an evidence-backed review of indicator/rule changes for V7. It must never silently change V7 or production configuration.
+Research which Binance Spot USDT pairs are likely to become the most profitable opportunities over the next 4, 12, and 24 hours, before the move happens. Do not require a fixed absolute return such as 15%, 20%, or 100%: rank candidates relative to the other eligible symbols at the same timestamp. Evaluate realized entry-to-exit returns, fees/slippage, and downside risk as well as future highs. The output is an evidence-backed review of indicator/rule changes for V7. It must never silently change V7 or production configuration.
 
 ## First baseline implemented in this branch
-- Labels the top 10% of symbols at each timestamp by the maximum high return over a future horizon.
+- Uses a relative ranking target: labels the top 10% of eligible symbols at each timestamp by maximum future high return, with no fixed percentage threshold.
+- The future-high target is only a discovery label, not proof of a tradable profit. The next evaluation step must simulate entry after the signal, realistic exits, fees, slippage, and adverse excursion.
 - Uses only features calculated at the signal timestamp.
 - Uses chronological train/validation/test splits with a horizon embargo.
 - Reports precision among the highest-ranked candidates, lift over the base rate, average precision, and validation permutation importance.
@@ -20,7 +21,7 @@ Research which Binance Spot USDT pairs are likely to become top gainers over the
 
 ## Evaluation rules
 - Use rolling/forward-chaining tests after the baseline, and never tune against the final test set.
-- Report top-5/top-10 precision, lift, average precision, forward returns after fees/slippage, and adverse excursion.
+- Report top-5/top-10 precision, lift, average precision, forward returns after fees/slippage, adverse excursion, and risk-adjusted results. Rank by expected opportunity rather than assuming a single return threshold fits every market regime.
 - Compare with simple baselines (past momentum, volume spike, and random/top-volume selection).
 - Check symbol-level and time-level leakage, duplicate candles, delisted coins, and sparse labels.
 - News features are a separate experiment; they must show incremental out-of-time value over price/volume-only models.
