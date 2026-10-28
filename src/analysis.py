@@ -50,17 +50,23 @@ def build_features(df, symbol):
 
     # Normalize timestamps and numeric columns.
     raw_open_time = df["open_time"]
-    numeric_open_time = pd.to_numeric(raw_open_time, errors="coerce")
-    if numeric_open_time.notna().mean() >= 0.95:
-        # Binance REST klines use Unix epoch milliseconds. Without unit="ms",
-        # pandas interprets these integers as nanoseconds and shifts dates to 1970.
-        df["open_time"] = pd.to_datetime(
-            numeric_open_time, unit="ms", utc=True, errors="coerce"
-        )
-    else:
+    # Preserve already-parsed datetime columns. Converting datetimes to integers
+    # first produces nanoseconds, which must never be reinterpreted as milliseconds.
+    if pd.api.types.is_datetime64_any_dtype(raw_open_time.dtype):
         df["open_time"] = pd.to_datetime(
             raw_open_time, utc=True, errors="coerce"
         )
+    else:
+        numeric_open_time = pd.to_numeric(raw_open_time, errors="coerce")
+        if numeric_open_time.notna().mean() >= 0.95:
+            # Binance REST klines use Unix epoch milliseconds.
+            df["open_time"] = pd.to_datetime(
+                numeric_open_time, unit="ms", utc=True, errors="coerce"
+            )
+        else:
+            df["open_time"] = pd.to_datetime(
+                raw_open_time, utc=True, errors="coerce"
+            )
 
     df = (
         df.dropna(subset=["open_time"])
