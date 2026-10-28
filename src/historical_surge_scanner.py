@@ -1,4 +1,5 @@
 """Historical surge discovery for small Binance Spot USDT altcoins."""
+# Research-only scanner; no live trading or order placement.
 import argparse, json, time
 from pathlib import Path
 import pandas as pd
