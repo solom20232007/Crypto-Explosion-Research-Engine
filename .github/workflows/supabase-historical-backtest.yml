@@ -1,0 +1,60 @@
+name: Supabase Historical Research Backtest
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  historical-backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+    steps:
+      - name: Checkout research branch
+        uses: actions/checkout@v4
+        with:
+          ref: research/prediction-ledger-monitor-v1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate Supabase secrets are configured
+        shell: bash
+        run: |
+          test -n "$SUPABASE_URL" || (echo "Missing GitHub Actions secret SUPABASE_URL" && exit 1)
+          test -n "$SUPABASE_SECRET_KEY" || (echo "Missing GitHub Actions secret SUPABASE_SECRET_KEY" && exit 1)
+
+      - name: Read existing candles from Supabase
+        run: python main.py load-supabase --symbols BTCUSDT ETHUSDT SOLUSDT --timeframe 1h
+
+      - name: Build features and historical labels
+        run: python main.py analyze --symbols BTCUSDT ETHUSDT SOLUSDT
+
+      - name: Train, validate, and evaluate baseline
+        run: python main.py train
+
+      - name: Evaluate all test predictions and signal outcomes
+        run: python main.py monitor
+
+      - name: Upload research reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-historical-research-reports
+          path: |
+            reports/
+            data/features.csv
+          if-no-files-found: warn
+          retention-days: 14
