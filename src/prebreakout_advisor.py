@@ -10,6 +10,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+from src.technical_indicators import MODEL_TECHNICAL_COLUMNS
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.inspection import permutation_importance
@@ -22,6 +24,7 @@ FEATURE_COLUMNS = [
     "bb_width_20", "bb_position_20", "sma_ratio_20", "sma_ratio_50",
     "volume_ratio_20", "quote_volume_log", "quote_volume_ratio_20",
     "volatility_24h",
+    *MODEL_TECHNICAL_COLUMNS,
 ]
 HORIZONS = (4, 12, 24)
 TOP_FRACTION = 0.10
