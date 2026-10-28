@@ -58,6 +58,14 @@ def main():
         help="Upload research results to Supabase"
     )
 
+    p_history = sub.add_parser("collect-history", help="Collect historical Binance Spot 1h candles")
+    p_history.add_argument("--start", default="2023-10-28T00:00:00Z")
+    p_history.add_argument("--end", default="2026-10-28T00:00:00Z")
+    p_history.add_argument("--symbols-file", type=Path, default=None)
+    p_history.add_argument("--max-symbols", type=int, default=None)
+    sub.add_parser("audit-history", help="Audit historical candle coverage")
+    sub.add_parser("advisor", help="Run cross-sectional pre-breakout advisor on data/features.csv")
+
     args = parser.parse_args()
     Path("data/raw").mkdir(parents=True, exist_ok=True)
     Path("reports").mkdir(parents=True, exist_ok=True)
@@ -78,6 +86,12 @@ def main():
         run_monitor()
     elif args.command == "upload":
         upload_results()
+    elif args.command == "collect-history":
+        collect_history(args.start, args.end, Path("data/raw"), args.symbols_file, args.max_symbols)
+    elif args.command == "audit-history":
+        audit_history()
+    elif args.command == "advisor":
+        run_advisor()
 
 
 if __name__ == "__main__":
