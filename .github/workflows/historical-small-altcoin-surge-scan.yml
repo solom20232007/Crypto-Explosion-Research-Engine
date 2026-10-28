@@ -1,5 +1,10 @@
 name: Historical Small-Altcoin Surge Scanner
 on:
+  push:
+    branches:
+      - research/binance-prebreakout-advisor-v1
+    paths:
+      - .github/workflows/historical-small-altcoin-surge-scan.yml
   workflow_dispatch:
     inputs:
       start:
@@ -46,12 +51,12 @@ jobs:
       - name: Scan history and gather hourly context
         run: |
           MAX_ARGS=()
-          if [ "\${{ inputs.max_symbols }}" != "0" ]; then
-            MAX_ARGS+=(--max-symbols "\${{ inputs.max_symbols }}")
+          if [ "${{ inputs.max_symbols }}" != "0" ]; then
+            MAX_ARGS+=(--max-symbols "${{ inputs.max_symbols }}")
           fi
           python -m src.historical_surge_scanner \
-            --start "\${{ inputs.start }}" --end "\${{ inputs.end }}" \
-            --max-events "\${{ inputs.max_events }}" "\${MAX_ARGS[@]}"
+            --start "${{ inputs.start }}" --end "${{ inputs.end }}" \
+            --max-events "${{ inputs.max_events }}" "${MAX_ARGS[@]}"
       - name: Validate outputs
         run: |
           python - <<'PY'
