@@ -92,6 +92,12 @@ def download_symbol(symbol: str, start_ms: int, end_ms: int, out_dir: Path,
 
     existing = existing.reindex(columns=COLUMNS)
     cursor = start_ms
+    if not existing.empty:
+        # Resume after the newest persisted candle. The separate coverage audit
+        # is still needed to detect gaps inside the already-downloaded range.
+        latest_existing = int(pd.to_numeric(existing["open_time"], errors="coerce").max())
+        if latest_existing >= start_ms:
+            cursor = max(start_ms, latest_existing + 60 * 60 * 1000)
     pages = 0
     fetched = 0
     while cursor < end_ms:
