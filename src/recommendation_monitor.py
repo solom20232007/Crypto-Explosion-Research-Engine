@@ -181,9 +181,19 @@ def _feature_associations(ledger: pd.DataFrame) -> pd.DataFrame:
         "predicted_at_selected_threshold", "predicted_at_0_5", "split",
         "open", "high", "low", "close", "volume", "quote_volume",
     }
+    outcome_prefixes = (
+        "close_return_", "max_high_return_", "max_low_return_",
+    )
+    outcome_columns = {
+        "max_favorable_return_24h", "max_adverse_return_24h",
+        "target_hit_15pct_24h", "bars_to_target_15pct_24h",
+        "is_model_signal", "signal_emitted", "cooldown_suppressed",
+    }
     numeric = [
         col for col in ledger.select_dtypes(include=[np.number]).columns
         if col not in excluded
+        and col not in outcome_columns
+        and not col.startswith(outcome_prefixes)
     ]
     if "actual" not in ledger.columns or ledger["actual"].nunique() < 2:
         return pd.DataFrame(columns=[
