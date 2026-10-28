@@ -1,0 +1,36 @@
+name: Dispatch Binance History Pilot
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "UTC start date/time (inclusive)"
+        required: true
+        default: "2023-10-28T00:00:00Z"
+        type: string
+      end:
+        description: "UTC end date/time (exclusive)"
+        required: true
+        default: "2026-10-28T00:00:00Z"
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger research-branch collection workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          START_DATE: ${{ inputs.start }}
+          END_DATE: ${{ inputs.end }}
+        run: |
+          gh workflow run collect-binance-history.yml \
+            --repo "$REPO" \
+            --ref research/binance-prebreakout-advisor-v1 \
+            -f start="$START_DATE" \
+            -f end="$END_DATE"
