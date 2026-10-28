@@ -10,6 +10,7 @@ from src.supabase_loader import load_from_supabase
 from src.prebreakout_advisor import run_advisor
 from src.binance_history_collector import collect as collect_history
 from src.history_coverage import audit_history
+from src.historical_surge_scanner import run_scan as scan_historical_surges
 
 
 def main():
@@ -66,6 +67,14 @@ def main():
     sub.add_parser("audit-history", help="Audit historical candle coverage")
     sub.add_parser("advisor", help="Run cross-sectional pre-breakout advisor on data/features.csv")
 
+    p_surge = sub.add_parser("scan-surges", help="Scan three years of small-altcoin daily surges")
+    p_surge.add_argument("--start", default="2023-10-28T00:00:00Z")
+    p_surge.add_argument("--end", default="2026-10-28T00:00:00Z")
+    p_surge.add_argument("--out-dir", type=Path, default=Path("reports/surge_scan"))
+    p_surge.add_argument("--max-symbols", type=int, default=None)
+    p_surge.add_argument("--max-events", type=int, default=250)
+    p_surge.add_argument("--min-quote-volume-usdt", type=float, default=100000)
+
     args = parser.parse_args()
     Path("data/raw").mkdir(parents=True, exist_ok=True)
     Path("reports").mkdir(parents=True, exist_ok=True)
@@ -92,6 +101,9 @@ def main():
         audit_history()
     elif args.command == "advisor":
         run_advisor()
+    elif args.command == "scan-surges":
+        scan_historical_surges(args.start, args.end, args.out_dir, args.max_symbols,
+                               args.max_events, args.min_quote_volume_usdt)
 
 
 if __name__ == "__main__":
