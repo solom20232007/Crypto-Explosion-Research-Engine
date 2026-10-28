@@ -5,6 +5,8 @@ import json
 import numpy as np
 import pandas as pd
 
+from src.technical_indicators import add_technical_indicators
+
 RAW_DIR = Path("data/raw")
 REPORT_DIR = Path("reports")
 FEATURES_PATH = Path("data/features.csv")
@@ -176,6 +178,10 @@ def build_features(df, symbol):
 
     # Recent volatility.
     out["volatility_24h"] = out["ret_1h"].rolling(24).std()
+
+    # Broad causal technical indicators and current-state breakout phase labels.
+    # This runs after timestamp sorting/cleaning, so output rows remain aligned.
+    out = pd.concat([out, add_technical_indicators(df)], axis=1)
 
     # Historical event:
     # Did the closing price rise at least 15% over the preceding 24 bars?
