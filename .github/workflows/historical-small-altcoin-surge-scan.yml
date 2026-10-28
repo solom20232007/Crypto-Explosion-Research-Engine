@@ -1,0 +1,78 @@
+name: Historical Small-Altcoin Surge Scanner
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "UTC start (inclusive)"
+        required: true
+        default: "2023-10-28T00:00:00Z"
+        type: string
+      end:
+        description: "UTC end (exclusive)"
+        required: true
+        default: "2026-10-28T00:00:00Z"
+        type: string
+      max_symbols:
+        description: "Smoke-test cap; 0 scans all eligible pairs"
+        required: true
+        default: "0"
+        type: string
+      max_events:
+        description: "Top-ranked event dates to inspect hourly"
+        required: true
+        default: "250"
+        type: string
+permissions:
+  contents: read
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/binance-prebreakout-advisor-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+      - name: Run tests
+        run: python -m pytest -q
+      - name: Scan history and gather hourly context
+        run: |
+          MAX_ARGS=()
+          if [ "\${{ inputs.max_symbols }}" != "0" ]; then
+            MAX_ARGS+=(--max-symbols "\${{ inputs.max_symbols }}")
+          fi
+          python -m src.historical_surge_scanner \
+            --start "\${{ inputs.start }}" --end "\${{ inputs.end }}" \
+            --max-events "\${{ inputs.max_events }}" "\${MAX_ARGS[@]}"
+      - name: Validate outputs
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import pandas as pd
+          root=Path("reports/surge_scan")
+          summary=json.loads((root/"surge_scan_summary.json").read_text())
+          events=pd.read_csv(root/"surge_events.csv")
+          context=pd.read_csv(root/"surge_pre_event_context.csv")
+          assert summary["symbols_scanned"]>0
+          assert not {"BTCUSDT","ETHUSDT","SOLUSDT"}.intersection(set(events.get("symbol",[])))
+          print(json.dumps({"symbols_scanned":summary["symbols_scanned"],"event_rows":summary["event_rows"],
+            "selected_events_with_hourly_context":summary["selected_events_with_hourly_context"],
+            "failed_symbols":summary["symbols_with_errors"],"context_rows":len(context),
+            "survivorship_bias_warning":summary["survivorship_bias_warning"]},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: historical-small-altcoin-surge-scan
+          path: reports/surge_scan/
+          if-no-files-found: warn
+          retention-days: 30
