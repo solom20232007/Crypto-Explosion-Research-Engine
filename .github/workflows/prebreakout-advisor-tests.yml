@@ -24,4 +24,4 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest
       - name: Run pre-breakout advisor tests
-        run: pytest -q tests/test_prebreakout_advisor.py
+        run: pytest -q tests
