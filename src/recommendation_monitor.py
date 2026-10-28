@@ -157,17 +157,19 @@ def build_prediction_ledger(
     ledger["signal_emitted"] = False
     ledger["cooldown_suppressed"] = False
 
-    last_signal_index = {}
+    last_signal_time = {}
+    cooldown = pd.Timedelta(hours=cooldown_bars)
     for idx in ledger.sort_values(["timestamp", "symbol"]).index:
         symbol = str(ledger.at[idx, "symbol"])
         if not bool(ledger.at[idx, "is_model_signal"]):
             continue
-        previous = last_signal_index.get(symbol)
-        if previous is not None and idx - previous <= cooldown_bars:
+        current_time = ledger.at[idx, "timestamp"]
+        previous_time = last_signal_time.get(symbol)
+        if previous_time is not None and current_time - previous_time <= cooldown:
             ledger.at[idx, "cooldown_suppressed"] = True
             continue
         ledger.at[idx, "signal_emitted"] = True
-        last_signal_index[symbol] = idx
+        last_signal_time[symbol] = current_time
 
     return ledger.sort_values(["timestamp", "symbol"]).reset_index(drop=True)
 
