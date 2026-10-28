@@ -1,10 +1,10 @@
-
 import argparse
 from pathlib import Path
 
 from src.collector import save_universe, collect_symbols
 from src.analysis import analyze_symbols
 from src.modeling import train_model
+from src.recommendation_monitor import run_monitor
 from src.supabase_store import upload_results
 
 
@@ -36,7 +36,12 @@ def main():
 
     sub.add_parser(
         "train",
-        help="Train and time-split baseline model"
+        help="Train baseline with chronological validation and test"
+    )
+
+    sub.add_parser(
+        "monitor",
+        help="Evaluate saved test predictions and post-signal outcomes"
     )
 
     sub.add_parser(
@@ -67,6 +72,9 @@ def main():
 
     elif args.command == "train":
         train_model()
+
+    elif args.command == "monitor":
+        run_monitor()
 
     elif args.command == "upload":
         upload_results()
