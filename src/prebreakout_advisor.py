@@ -54,10 +54,20 @@ def add_cross_sectional_targets(frame: pd.DataFrame, horizon: int,
         indexes = list(indexes)
         closes = pd.to_numeric(data.loc[indexes, "close"], errors="coerce").to_numpy(float)
         highs = pd.to_numeric(data.loc[indexes, "high"], errors="coerce").to_numpy(float)
+        timestamps = data.loc[indexes, "timestamp"].to_numpy()
         values = np.full(len(indexes), np.nan, dtype=float)
+        expected_step = np.timedelta64(1, "h")
         for pos in range(len(indexes) - horizon):
-            future_high = np.nanmax(highs[pos + 1:pos + horizon + 1])
-            if np.isfinite(future_high) and closes[pos] > 0:
+            # A row-count horizon is only a true hour horizon when every candle
+            # is present. Missing/duplicate-time gaps must not silently stretch
+            # or shrink the forecast window.
+            window_times = timestamps[pos:pos + horizon + 1]
+            if not np.all(np.diff(window_times) == expected_step):
+                continue
+            future_window = highs[pos + 1:pos + horizon + 1]
+            if (np.isfinite(future_window).any()
+                    and np.isfinite(closes[pos]) and closes[pos] > 0):
+                future_high = np.nanmax(future_window)
                 values[pos] = future_high / closes[pos] - 1.0
         future_returns.loc[indexes] = values
 
