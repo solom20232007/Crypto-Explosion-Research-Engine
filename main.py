@@ -7,6 +7,9 @@ from src.modeling import train_model
 from src.recommendation_monitor import run_monitor
 from src.supabase_store import upload_results
 from src.supabase_loader import load_from_supabase
+from src.prebreakout_advisor import run_advisor
+from src.binance_history_collector import collect as collect_history
+from src.history_coverage import audit_history
 
 
 def main():
