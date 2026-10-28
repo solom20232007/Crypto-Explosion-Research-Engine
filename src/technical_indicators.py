@@ -22,6 +22,7 @@ MODEL_TECHNICAL_COLUMNS = [
     "vwap_ratio_24", "keltner_position_20", "keltner_width_20",
     "body_pct", "upper_wick_pct", "lower_wick_pct", "close_location",
     "return_skew_24", "downside_volatility_24", "upside_volatility_24",
+    "prebreakout_score", "early_breakout_score",
 ]
 
 
