@@ -54,7 +54,7 @@ jobs:
 
       - name: Collect Binance Spot 1h history
         run: |
-          python main.py collect-history \
+          python -m src.binance_history_collector \
             --start "${{ inputs.start }}" \
             --end "${{ inputs.end }}" \
             --symbols-file data/research_symbols.txt
