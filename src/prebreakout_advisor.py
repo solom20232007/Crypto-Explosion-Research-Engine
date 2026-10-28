@@ -54,9 +54,11 @@ def add_cross_sectional_targets(frame: pd.DataFrame, horizon: int,
         indexes = list(indexes)
         closes = pd.to_numeric(data.loc[indexes, "close"], errors="coerce").to_numpy(float)
         highs = pd.to_numeric(data.loc[indexes, "high"], errors="coerce").to_numpy(float)
-        timestamps = data.loc[indexes, "timestamp"].to_numpy()
+        # UTC timestamps are represented as integer nanoseconds for exact
+        # elapsed-time comparisons, including timezone-aware pandas values.
+        timestamps = data.loc[indexes, "timestamp"].astype("int64").to_numpy()
         values = np.full(len(indexes), np.nan, dtype=float)
-        expected_step = np.timedelta64(1, "h")
+        expected_step = 60 * 60 * 1_000_000_000
         for pos in range(len(indexes) - horizon):
             # A row-count horizon is only a true hour horizon when every candle
             # is present. Missing/duplicate-time gaps must not silently stretch
