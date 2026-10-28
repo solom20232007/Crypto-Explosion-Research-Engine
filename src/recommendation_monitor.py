@@ -177,7 +177,9 @@ def build_prediction_ledger(
 def _feature_associations(ledger: pd.DataFrame) -> pd.DataFrame:
     """Descriptive test-period feature differences; not causal attribution."""
     excluded = {
-        "timestamp", "symbol", "actual", "probability", "selected_threshold",
+        "timestamp", "symbol", "actual", "target_future_15pct_24h",
+        "explosion_15pct_24h", "historical_24h_return",
+        "probability", "selected_threshold",
         "predicted_at_selected_threshold", "predicted_at_0_5", "split",
         "open", "high", "low", "close", "volume", "quote_volume",
     }
@@ -294,8 +296,14 @@ def run_monitor(
         "actual_future_15pct_events": int((actual == 1).sum()),
         "false_negative_rows": int(((actual == 1) & (~predicted)).sum()),
         "false_positive_rows": int(((actual == 0) & predicted).sum()),
-        "target_hits_among_emitted_signals": int(
-            (signals["target_hit_15pct_24h"] == True).sum()  # noqa: E712
+        "target_hits_among_emitted_signals_with_complete_outcomes": int(
+            (
+                (signals["outcome_status"] == "complete_24h")
+                & (signals["target_hit_15pct_24h"] == True)  # noqa: E712
+            ).sum()
+        ),
+        "complete_outcome_emitted_signals": int(
+            (signals["outcome_status"] == "complete_24h").sum()
         ),
         "complete_24h_outcome_rows": int(complete.sum()),
         "incomplete_or_missing_outcome_rows": int((~complete).sum()),
