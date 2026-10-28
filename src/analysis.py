@@ -215,7 +215,7 @@ def analyze_symbols(symbols=None):
         if path.exists():
             path.unlink()
 
-    files = sorted(RAW_DIR.glob("*_*.csv"))
+    files = sorted(RAW_DIR.glob("*_1h.csv"))
 
     if symbols:
         allowed = set(symbols)
