@@ -10,6 +10,8 @@ import joblib
 import numpy as np
 import pandas as pd
 
+from src.technical_indicators import MODEL_TECHNICAL_COLUMNS
+
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import (
@@ -28,6 +30,7 @@ FEATURE_COLUMNS = [
     "rsi_14", "macd", "macd_signal", "macd_hist", "atr_14_pct",
     "bb_width_20", "bb_position_20", "sma_ratio_20", "sma_ratio_50",
     "volume_ratio_20", "quote_volume_log", "quote_volume_ratio_20", "volatility_24h",
+    *MODEL_TECHNICAL_COLUMNS,
 ]
 TARGET = "target_future_15pct_24h"
 HORIZON_HOURS = 24
