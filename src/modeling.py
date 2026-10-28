@@ -136,6 +136,15 @@ def train_model():
     # 24 hourly bars. This is a timestamp embargo, not a random split.
     first_boundary = pd.Timestamp(unique_times[int(len(unique_times) * 0.70)])
     second_boundary = pd.Timestamp(unique_times[int(len(unique_times) * 0.85)])
+    # NumPy may strip the UTC timezone from datetime64 values.
+    if first_boundary.tzinfo is None:
+        first_boundary = first_boundary.tz_localize("UTC")
+    else:
+        first_boundary = first_boundary.tz_convert("UTC")
+    if second_boundary.tzinfo is None:
+        second_boundary = second_boundary.tz_localize("UTC")
+    else:
+        second_boundary = second_boundary.tz_convert("UTC")
     embargo = pd.Timedelta(hours=HORIZON_HOURS)
 
     train_mask = df["timestamp"] < (first_boundary - embargo)
