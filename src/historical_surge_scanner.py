@@ -88,7 +88,7 @@ def run_scan(start,end,out_dir,max_symbols=None,max_events=250,min_quote_volume_
         except Exception as exc:
             failures.append({"symbol":sym,"error":f"{type(exc).__name__}: {exc}"}); print(json.dumps({"symbol":sym,"status":"error","error":str(exc)}))
         time.sleep(max(0,pause_seconds))
-    ev=pd.DataFrame(events)
+    ev=pd.DataFrame(events,columns=["symbol","event_date_utc","open_time","open","high","low","close","volume","quote_volume","daily_high_change_pct","daily_close_change_pct","close_change_3d_pct","close_change_7d_pct","volume_change_1d_pct","trigger_types"])
     if not ev.empty: ev=ev.sort_values(["daily_high_change_pct","daily_close_change_pct","close_change_3d_pct"],ascending=False)
     ep=out_dir/"surge_events.csv"; ev.to_csv(ep,index=False); selected=ev.head(max(1,max_events)) if not ev.empty else ev
     hourly_parts=[]; contexts=[]; hfail=[]
