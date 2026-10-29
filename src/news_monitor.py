@@ -93,10 +93,12 @@ def deduplicate_articles(news):
  frame["_title_key"]=frame.get("title",pd.Series("",index=frame.index)).fillna("").astype(str).str.lower()
  frame["_title_key"]=frame["_title_key"].str.replace(r"[^a-z0-9]+"," ",regex=True).str.strip()
  frame["_published_key"]=pd.to_datetime(frame.get("published_utc",pd.Series("",index=frame.index)),utc=True,errors="coerce").dt.floor("D")
- frame["_dedup_key"]=frame["_url_key"].where(frame["_url_key"]!="",frame["_title_key"]+"|"+frame["_published_key"].astype(str))
+ frame["_fallback_key"]=frame["_title_key"]+"|"+frame["_published_key"].astype(str)
+ frame["_fallback_key"]=frame["_fallback_key"].where(frame["_published_key"].notna(),frame["_title_key"]+"|"+frame.get("source_domain",pd.Series("",index=frame.index)).fillna("").astype(str))
+ frame["_dedup_key"]=frame["_url_key"].where(frame["_url_key"]!="",frame["_fallback_key"])
  rows=[]
  for _,group in frame.groupby("_dedup_key",dropna=False,sort=False):
-  row=group.iloc[0].drop(labels=["_url_key","_title_key","_published_key","_dedup_key"]).to_dict()
+  row=group.iloc[0].drop(labels=["_url_key","_title_key","_published_key","_fallback_key","_dedup_key"]).to_dict()
   for col in ("source_name","source_tier","source_type","source_domain"):
    vals=sorted({str(x) for x in group[col].dropna() if str(x)})
    row[col]="|".join(vals) if vals else row.get(col,"")
