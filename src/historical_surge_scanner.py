@@ -80,10 +80,10 @@ def run_scan(start,end,out_dir,max_symbols=None,max_events=250,min_quote_volume_
     if max_symbols is not None:
         if max_symbols<1: raise ValueError("--max-symbols must be positive")
         symbols=symbols[:max_symbols]
-    a,b=int(start.timestamp()*1000),int(end.timestamp()*1000); events=[]; failures=[]
+    a,b=int(start.timestamp()*1000),int(end.timestamp()*1000); events=[]; daily_parts=[]; failures=[]
     for i,sym in enumerate(symbols,1):
         try:
-            d=fetch_klines(sym,"1d",a,b,pause_seconds); e=detect_surge_events(d,sym)
+            d=fetch_klines(sym,"1d",a,b,pause_seconds);\n            if not d.empty:\n                d.insert(0,"symbol",sym); daily_parts.append(d)\n            e=detect_surge_events(d,sym)
             if not e.empty: e=e[e.quote_volume>=min_quote_volume_usdt]; events.extend(e.to_dict("records"))
             print(json.dumps({"progress":f"{i}/{len(symbols)}","symbol":sym,"daily_rows":len(d),"events":len(e),"status":"ok"}))
         except Exception as exc:
@@ -91,7 +91,7 @@ def run_scan(start,end,out_dir,max_symbols=None,max_events=250,min_quote_volume_
         time.sleep(max(0,pause_seconds))
     ev=pd.DataFrame(events,columns=["symbol","event_date_utc","open_time","open","high","low","close","volume","quote_volume","daily_high_change_pct","daily_close_change_pct","close_change_3d_pct","close_change_7d_pct","volume_change_1d_pct","trigger_types"])
     if not ev.empty: ev=ev.sort_values(["daily_high_change_pct","daily_close_change_pct","close_change_3d_pct"],ascending=False)
-    ep=out_dir/"surge_events.csv"; ev.to_csv(ep,index=False); selected=ev.head(max(1,max_events)) if not ev.empty else ev
+    ep=out_dir/"surge_events.csv"; ev.to_csv(ep,index=False); daily_path=out_dir/"daily_candles.csv"; (pd.concat(daily_parts,ignore_index=True) if daily_parts else pd.DataFrame(columns=["symbol"]+COLS)).to_csv(daily_path,index=False); selected=ev.head(max(1,max_events)) if not ev.empty else ev
     hourly_parts=[]; contexts=[]; hfail=[]
     for i,x in enumerate(selected.to_dict("records"),1):
         sym,date=x["symbol"],x["event_date_utc"]; t=int(pd.Timestamp(date,tz="UTC").timestamp()*1000)
@@ -113,7 +113,7 @@ def run_scan(start,end,out_dir,max_symbols=None,max_events=250,min_quote_volume_
       "symbols_scanned":len(symbols),"symbols_with_errors":len(failures),"event_rows":len(ev),
       "selected_events_with_hourly_context":len(selected),"minimum_event_quote_volume_usdt":min_quote_volume_usdt,
       "thresholds_pct":{"daily_high":25,"daily_close":20,"close_3d":40,"close_7d":75},
-      "failed_symbols":failures,"hourly_context_failures":hfail,"outputs":[str(ep),str(hp),str(cp)]}
+      "failed_symbols":failures,"hourly_context_failures":hfail,"daily_candle_rows":sum(len(x) for x in daily_parts),"outputs":[str(daily_path),str(ep),str(hp),str(cp)]}
     (out_dir/"surge_scan_summary.json").write_text(json.dumps(summary,indent=2),encoding="utf-8")
     print(json.dumps(summary,indent=2)); return summary
 def main():
