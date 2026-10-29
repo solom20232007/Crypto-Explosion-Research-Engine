@@ -42,7 +42,7 @@ def build_dataset(candles: pd.DataFrame) -> pd.DataFrame:
     f["quote_volume_trend_3d_vs_7d"] = g.quote_volume.transform(lambda s: s.shift(1).rolling(3, min_periods=2).mean()) / f.quote_volume_mean_7d.replace(0, np.nan)
     # Labels start strictly after the signal-day close; no same-day high/close enters a target.
     for horizon, threshold in ((1, 25), (3, 40), (7, 75)):
-        future_high = g.high.transform(lambda s: s.shift(-1).rolling(horizon, min_periods=horizon).max().shift(-(horizon - 1)))
+        future_high = g.high.transform(lambda s: pd.concat([s.shift(-i) for i in range(1, horizon + 1)], axis=1).max(axis=1, skipna=False))
         f[f"future_max_high_{horizon}d_pct"] = (future_high / f.close - 1) * 100
         f[f"explosion_{horizon}d"] = np.where(future_high.notna(), (f[f"future_max_high_{horizon}d_pct"] >= threshold).astype("int8"), np.nan)
     f["split"] = np.select(
