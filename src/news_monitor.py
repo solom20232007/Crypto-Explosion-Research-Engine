@@ -190,6 +190,65 @@ def parse_binance_announcement_message(message, first_seen):
   "source_type":"exchange_official","category":category,"sentiment_hint":score,
   "catalog_id":payload.get("catalogId"),"catalog_name":str(payload.get("catalogName",""))}
 
+
+def parse_binance_public_response(payload, first_seen, language="en"):
+ """Normalize Binance's public CMS article-list response (best-effort, undocumented endpoint)."""
+ if isinstance(payload,str):
+  payload=json.loads(payload)
+ if not isinstance(payload,dict):
+  raise ValueError("Binance public response must be a JSON object")
+ data=payload.get("data") or {}
+ catalogs=data.get("catalogs") or []
+ if not isinstance(catalogs,list):
+  raise ValueError("Unexpected Binance public CMS catalogs structure")
+ seen=first_seen if isinstance(first_seen,datetime) else parse_datetime(str(first_seen))
+ if seen is None:
+  raise ValueError("first_seen must be a valid timestamp")
+ rows=[]
+ for catalog in catalogs:
+  if not isinstance(catalog,dict): continue
+  category_name=str(catalog.get("catalogName") or catalog.get("name") or "").strip()
+  articles=catalog.get("articles") or []
+  if not isinstance(articles,list): continue
+  for article in articles:
+   if not isinstance(article,dict): continue
+   title=str(article.get("title") or "").strip()
+   code=str(article.get("code") or article.get("articleCode") or "").strip()
+   if not title or not code: continue
+   release=article.get("releaseDate") or article.get("publishDate")
+   published=None
+   if release is not None:
+    try:
+     numeric=float(release)
+     if numeric > 1e12: numeric /= 1000
+     published=datetime.fromtimestamp(numeric,tz=timezone.utc)
+    except (TypeError,ValueError,OverflowError,OSError): published=None
+   url=f"https://www.binance.com/{language}/support/announcement/{code}"
+   text_value=title
+   category,score=classify(text_value+" "+category_name)
+   rows.append({"title":title,"summary":"","url":url,"source_domain":"binance.com",
+    "published_utc":utc_iso(published) if published else "",
+    "first_seen_utc":utc_iso(seen),"available_at_utc":utc_iso(seen),
+    "published_time_missing":published is None,"text":text_value,
+    "source_name":"Binance Public Announcements Page","source_tier":"official_primary",
+    "source_type":"exchange_official","category":category,"sentiment_hint":score,
+    "catalog_id":catalog.get("catalogId",catalog.get("id")),
+    "catalog_name":category_name})
+ return rows
+
+def collect_binance_public_announcements(session=requests, limit=50, now=None, endpoint=None):
+ """Fetch latest Binance announcements without credentials; endpoint is best-effort and undocumented."""
+ if not 1 <= int(limit) <= 100:
+  raise ValueError("limit must be between 1 and 100")
+ url=endpoint or "https://www.binance.com/bapi/apex/v1/public/apex/cms/article/list/query"
+ params={"type":"1","pageNo":"1","pageSize":str(int(limit))}
+ headers={"User-Agent":"Mozilla/5.0 (compatible; PreBreakoutResearchBot/1.0)",
+  "Accept":"application/json, text/plain, */*","Accept-Language":"en-US,en;q=0.9",
+  "Referer":"https://www.binance.com/en/support/announcement"}
+ response=session.get(url,params=params,timeout=20,headers=headers)
+ response.raise_for_status()
+ return parse_binance_public_response(response.json(),now or datetime.now(timezone.utc))
+
 def build_binance_ws_url(api_secret, now_ms, random_value, topic="com_announcement_en", recv_window=30000):
  """Build the signed URL documented for Binance Announcements WebSocket."""
  import hashlib, hmac
@@ -255,11 +314,21 @@ def run(feed_urls,candle_path,aliases_path=None,output_dir=OUT,extra_articles=No
 def main():
  p=argparse.ArgumentParser(); p.add_argument("--candles",default="reports/surge_scan/daily_candles.csv")
  p.add_argument("--aliases",default=""); p.add_argument("--output-dir",default=str(OUT))
- p.add_argument("--feeds",default=os.getenv("NEWS_FEED_URLS","")); p.add_argument("--feed-config",default=""); p.add_argument("--binance-ws-seconds",type=int,default=int(os.getenv("BINANCE_ANNOUNCEMENTS_SECONDS","0"))); a=p.parse_args()
+ p.add_argument("--feeds",default=os.getenv("NEWS_FEED_URLS","")); p.add_argument("--feed-config",default=""); p.add_argument("--binance-public-limit",type=int,default=50); p.add_argument("--binance-ws-seconds",type=int,default=0); a=p.parse_args()
  feeds=[x.strip() for x in a.feeds.split(",") if x.strip()]
  if a.feed_config:
   configured=load_feed_config(a.feed_config)
   feeds=configured+[{"url":url} for url in feeds]
  if not feeds: p.error("Provide --feeds, --feed-config, or NEWS_FEED_URLS")
- print(json.dumps(run(feeds,a.candles,a.aliases or None,Path(a.output_dir)),indent=2))
+ public_articles=[]; public_errors=[]
+ try: public_articles=collect_binance_public_announcements(limit=a.binance_public_limit)
+ except Exception as exc: public_errors.append({"feed":"Binance public announcements","source_name":"Binance Public Announcements Page","error":str(exc)})
+ extra_articles=list(public_articles)
+ if a.binance_ws_seconds>0:
+  key=os.getenv("BINANCE_API_KEY",""); secret=os.getenv("BINANCE_API_SECRET","")
+  if key and secret:
+   try: extra_articles.extend(collect_binance_announcements(key,secret,a.binance_ws_seconds))
+   except Exception as exc: public_errors.append({"feed":"Binance announcements WebSocket","source_name":"Binance Announcements WebSocket","error":str(exc)})
+  else: public_errors.append({"feed":"Binance announcements WebSocket","source_name":"Binance Announcements WebSocket","error":"Skipped: API credentials are not configured"})
+ print(json.dumps(run(feeds,a.candles,a.aliases or None,Path(a.output_dir),extra_articles,public_errors),indent=2))
 if __name__=="__main__": main()
