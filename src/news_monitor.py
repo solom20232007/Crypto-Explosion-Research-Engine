@@ -156,6 +156,78 @@ def build_symbol_features(news,candles,aliases=None):
    "negative_news_hint_count_7d":(r7.sentiment_hint<0).sum()})
  return pd.DataFrame(results)
 
+def parse_binance_announcement_message(message, first_seen):
+ """Normalize one official Binance Announcements WebSocket DATA frame."""
+ if isinstance(message, bytes):
+  message=message.decode("utf-8")
+ frame=json.loads(message) if isinstance(message,str) else message
+ if not isinstance(frame,dict) or frame.get("type")!="DATA":
+  return None
+ if frame.get("topic")!="com_announcement_en":
+  return None
+ payload=frame.get("data",{})
+ if isinstance(payload,str):
+  payload=json.loads(payload)
+ if not isinstance(payload,dict) or not payload.get("title"):
+  return None
+ published_ms=payload.get("publishDate")
+ published=None
+ if published_ms is not None:
+  try: published=datetime.fromtimestamp(int(published_ms)/1000,tz=timezone.utc)
+  except (TypeError,ValueError,OverflowError,OSError): published=None
+ title=str(payload.get("title","")).strip()
+ body=str(payload.get("body","")).strip()
+ text_value=(title+" "+body).strip()
+ category,score=classify(text_value)
+ seen=first_seen if isinstance(first_seen,datetime) else parse_datetime(str(first_seen))
+ if seen is None:
+  raise ValueError("first_seen must be a valid timestamp")
+ return {"title":title,"summary":body,"url":"","source_domain":"binance.com",
+  "published_utc":utc_iso(published) if published else "",
+  "first_seen_utc":utc_iso(seen),"available_at_utc":utc_iso(seen),
+  "published_time_missing":published is None,"text":text_value,
+  "source_name":"Binance Announcements WebSocket","source_tier":"official_primary",
+  "source_type":"exchange_official","category":category,"sentiment_hint":score,
+  "catalog_id":payload.get("catalogId"),"catalog_name":str(payload.get("catalogName",""))}
+
+def build_binance_ws_url(api_secret, now_ms, random_value, topic="com_announcement_en", recv_window=30000):
+ """Build the signed URL documented for Binance Announcements WebSocket."""
+ import hashlib, hmac
+ from urllib.parse import urlencode
+ params={"random":str(random_value),"topic":topic,"recvWindow":str(recv_window),"timestamp":str(int(now_ms))}
+ payload=urlencode(sorted(params.items()))
+ signature=hmac.new(api_secret.encode("utf-8"),payload.encode("utf-8"),hashlib.sha256).hexdigest()
+ return "wss://api.binance.com/sapi/wss?"+payload+"&signature="+signature
+
+def collect_binance_announcements(api_key,api_secret,duration_seconds=60,now_fn=None,ws_factory=None):
+ """Collect live official announcements for a bounded interval; requires a Binance API key."""
+ import time, uuid
+ try:
+  import websocket
+ except ImportError as exc:
+  raise RuntimeError("Install websocket-client to collect Binance announcements") from exc
+ factory=ws_factory or websocket.create_connection
+ now_fn=now_fn or (lambda: int(time.time()*1000))
+ url=build_binance_ws_url(api_secret,now_fn(),uuid.uuid4().hex[:24])
+ ws=factory(url,header=[f"X-MBX-APIKEY: {api_key}"],timeout=1)
+ rows=[]; started=time.monotonic(); last_ping=started
+ try:
+  while time.monotonic()-started < max(1,int(duration_seconds)):
+   current=time.monotonic()
+   if current-last_ping>=30:
+    ws.ping(); last_ping=current
+   try:
+    raw=ws.recv()
+   except websocket.WebSocketTimeoutException:
+    continue
+   if not raw: continue
+   row=parse_binance_announcement_message(raw,datetime.now(timezone.utc))
+   if row: rows.append(row)
+ finally:
+  try: ws.close()
+  except Exception: pass
+ return rows
+
 def run(feed_urls,candle_path,aliases_path=None,output_dir=OUT):
  candles=pd.read_csv(candle_path); aliases=json.loads(Path(aliases_path).read_text()) if aliases_path else {}
  raw,errors=collect_feeds(feed_urls)
@@ -181,7 +253,7 @@ def run(feed_urls,candle_path,aliases_path=None,output_dir=OUT):
 def main():
  p=argparse.ArgumentParser(); p.add_argument("--candles",default="reports/surge_scan/daily_candles.csv")
  p.add_argument("--aliases",default=""); p.add_argument("--output-dir",default=str(OUT))
- p.add_argument("--feeds",default=os.getenv("NEWS_FEED_URLS","")); p.add_argument("--feed-config",default=""); a=p.parse_args()
+ p.add_argument("--feeds",default=os.getenv("NEWS_FEED_URLS","")); p.add_argument("--feed-config",default=""); p.add_argument("--binance-ws-seconds",type=int,default=int(os.getenv("BINANCE_ANNOUNCEMENTS_SECONDS","0"))); a=p.parse_args()
  feeds=[x.strip() for x in a.feeds.split(",") if x.strip()]
  if a.feed_config:
   configured=load_feed_config(a.feed_config)
