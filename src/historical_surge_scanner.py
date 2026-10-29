@@ -83,7 +83,10 @@ def run_scan(start,end,out_dir,max_symbols=None,max_events=250,min_quote_volume_
     a,b=int(start.timestamp()*1000),int(end.timestamp()*1000); events=[]; daily_parts=[]; failures=[]
     for i,sym in enumerate(symbols,1):
         try:
-            d=fetch_klines(sym,"1d",a,b,pause_seconds);\n            if not d.empty:\n                d.insert(0,"symbol",sym); daily_parts.append(d)\n            e=detect_surge_events(d,sym)
+            d=fetch_klines(sym,"1d",a,b,pause_seconds);
+            if not d.empty:
+                d.insert(0,"symbol",sym); daily_parts.append(d)
+            e=detect_surge_events(d,sym)
             if not e.empty: e=e[e.quote_volume>=min_quote_volume_usdt]; events.extend(e.to_dict("records"))
             print(json.dumps({"progress":f"{i}/{len(symbols)}","symbol":sym,"daily_rows":len(d),"events":len(e),"status":"ok"}))
         except Exception as exc:
