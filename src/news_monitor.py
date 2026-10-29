@@ -228,9 +228,11 @@ def collect_binance_announcements(api_key,api_secret,duration_seconds=60,now_fn=
   except Exception: pass
  return rows
 
-def run(feed_urls,candle_path,aliases_path=None,output_dir=OUT):
+def run(feed_urls,candle_path,aliases_path=None,output_dir=OUT,extra_articles=None,extra_errors=None):
  candles=pd.read_csv(candle_path); aliases=json.loads(Path(aliases_path).read_text()) if aliases_path else {}
  raw,errors=collect_feeds(feed_urls)
+ raw.extend(extra_articles or [])
+ errors.extend(extra_errors or [])
  for item in raw: item["category"],item["sentiment_hint"]=classify(item["text"])
  news=deduplicate_articles(pd.DataFrame(raw))
  if not news.empty:
