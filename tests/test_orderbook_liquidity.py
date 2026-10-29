@@ -20,13 +20,13 @@ class OrderbookLiquidityTests(unittest.TestCase):
             "bids": [["99", "20"], ["98.5", "20"]],
             "asks": [["101", "20"], ["101.5", "20"]],
         }
-        row = calculate_metrics("TESTUSDT", book, "2026-10-29T00:00:00+00:00", notionals=(100, 1000))
+        row = calculate_metrics("TESTUSDT", book, "2026-10-29T00:00:00+00:00", notionals=(100, 10000))
         self.assertAlmostEqual(row["spread_bps"], 200, places=3)
         self.assertGreater(row["depth_bid_usdt_1pct"], 0)
         self.assertGreater(row["depth_ask_usdt_1pct"], 0)
         self.assertAlmostEqual(row["bid_ask_qty_imbalance"], 0, places=6)
         self.assertIsNotNone(row["buy_slippage_bps_100_usdt"])
-        self.assertIsNone(row["buy_slippage_bps_1000_usdt"])
+        self.assertIsNone(row["buy_slippage_bps_10000_usdt"])
 
     def test_empty_or_crossed_book_rejected(self):
         with self.assertRaises(ValueError):
