@@ -33,3 +33,14 @@ Run with the registry:
 `python -m src.news_monitor --feed-config config/news_feeds.json --candles reports/surge_scan/daily_candles.csv`
 
 The registry can be edited to add project-specific official blogs and chain foundations. Exchange newsroom pages that do not expose RSS/Atom should be integrated through a dedicated official API/page adapter rather than pretending they are RSS feeds. Source metadata is retained in every article row.
+
+
+## Official Binance announcements WebSocket
+
+Binance documents an official English announcements topic, `com_announcement_en`, delivered over `wss://api.binance.com/sapi/wss`. The documented stream requires an API key in the `X-MBX-APIKEY` header and an HMAC-signed connection URL. This collector is optional and bounded by a user-selected duration; it does not place orders or request trading permissions.
+
+Set repository Actions secrets `BINANCE_API_KEY` and `BINANCE_API_SECRET` (API key permissions should be limited to what Binance requires for this public announcements service; never enable withdrawals or trading). In the manual workflow, set `binance_ws_seconds` to a short collection window such as 60–300 seconds. Leave it at 0 to skip the WebSocket connection.
+
+The adapter stores Binance's `publishDate` as `published_utc`, but uses the local receipt time as `first_seen_utc` and `available_at_utc` for leakage-safe research. The documented payload contains catalog ID/name, title, body and publish timestamp, but no article URL; therefore the URL is left blank rather than fabricated. The official API only pushes English announcements. This live stream is not a historical archive and must not be used to backfill historical first-seen times.
+
+Reference: Binance's [official WebSocket API overview](https://developers.binance.com/en/docs/products/announcements/general-info) and [announcement payload schema](https://developers.binance.com/en/docs/products/announcements/announcement).
