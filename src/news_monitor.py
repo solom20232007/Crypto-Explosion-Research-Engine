@@ -81,7 +81,7 @@ def match_symbols(text,symbols,aliases=None):
  aliases=aliases or {}; upper=text.upper(); found=[]
  for symbol in symbols:
   for term in _terms_for_symbol(symbol,aliases):
-   if re.search(r"(?<![A-Z0-9])\\$?"+re.escape(term)+r"(?![A-Z0-9])",upper):
+   if re.search(r"(?<![A-Z0-9])\$?"+re.escape(term)+r"(?![A-Z0-9])",upper):
     found.append(symbol); break
  return found
 
