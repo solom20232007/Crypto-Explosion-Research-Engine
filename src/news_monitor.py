@@ -146,7 +146,9 @@ def main():
  p.add_argument("--aliases",default=""); p.add_argument("--output-dir",default=str(OUT))
  p.add_argument("--feeds",default=os.getenv("NEWS_FEED_URLS","")); p.add_argument("--feed-config",default=""); a=p.parse_args()
  feeds=[x.strip() for x in a.feeds.split(",") if x.strip()]
- if a.feed_config: feeds=load_feed_config(a.feed_config)
+ if a.feed_config:
+  configured=load_feed_config(a.feed_config)
+  feeds=configured+[{"url":url} for url in feeds]
  if not feeds: p.error("Provide --feeds, --feed-config, or NEWS_FEED_URLS")
  print(json.dumps(run(feeds,a.candles,a.aliases or None,Path(a.output_dir)),indent=2))
 if __name__=="__main__": main()
