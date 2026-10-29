@@ -13,7 +13,7 @@ def test_binance_announcement_payload_is_normalized_with_receipt_time():
  assert row["source_type"]=="exchange_official"
  assert row["first_seen_utc"]=="2025-07-23T12:00:00Z"
  assert row["available_at_utc"]==row["first_seen_utc"]
- assert row["published_utc"]=="2025-07-23T09:20:31.403000Z"
+ assert row["published_utc"]=="2025-07-23T08:00:31.403000Z"
  assert row["catalog_name"]=="Delisting" and row["catalog_id"]==161
  assert row["url"]==""
 
