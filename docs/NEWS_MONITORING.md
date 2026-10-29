@@ -1,6 +1,6 @@
 # News and Announcements Monitoring
 
-The module ingests RSS/Atom feeds and creates auditable article records plus per-symbol daily features.
+The module ingests RSS/Atom feeds and Binance public announcements, then creates auditable article records plus per-symbol daily features. No Binance API credentials are required for the public-page collector.
 
 ## Run
 
@@ -35,12 +35,14 @@ Run with the registry:
 The registry can be edited to add project-specific official blogs and chain foundations. Exchange newsroom pages that do not expose RSS/Atom should be integrated through a dedicated official API/page adapter rather than pretending they are RSS feeds. Source metadata is retained in every article row.
 
 
-## Official Binance announcements WebSocket
+## Public Binance announcements (no API key)
 
-Binance documents an official English announcements topic, `com_announcement_en`, delivered over `wss://api.binance.com/sapi/wss`. The documented stream requires an API key in the `X-MBX-APIKEY` header and an HMAC-signed connection URL. This collector is optional and bounded by a user-selected duration; it does not place orders or request trading permissions.
+The default workflow also fetches the latest English announcements from Binance's public announcement CMS. It uses the public page's underlying JSON response, normalizes each article into the same schema as RSS items, and stores the official announcement URL, category, publisher timestamp, and local first-seen/available-at timestamp. No API key, secret, trading permission, or withdrawal permission is needed.
 
-Set repository Actions secrets `BINANCE_API_KEY` and `BINANCE_API_SECRET` (API key permissions should be limited to what Binance requires for this public announcements service; never enable withdrawals or trading). In the manual workflow, set `binance_ws_seconds` to a short collection window such as 60–300 seconds. Leave it at 0 to skip the WebSocket connection.
+The collector is best-effort: Binance does not document this CMS endpoint as a stable public developer API, so its response shape or availability may change. If the request fails, the workflow records the error and continues with configured RSS/Atom sources. It does not fabricate announcement records or historical first-seen times.
 
-The adapter stores Binance's `publishDate` as `published_utc`, but uses the local receipt time as `first_seen_utc` and `available_at_utc` for leakage-safe research. The documented payload contains catalog ID/name, title, body and publish timestamp, but no article URL; therefore the URL is left blank rather than fabricated. The official API only pushes English announcements. This live stream is not a historical archive and must not be used to backfill historical first-seen times.
+Run with the default 50-item public announcement fetch:
 
-Reference: Binance's [official WebSocket API overview](https://developers.binance.com/en/docs/products/announcements/general-info) and [announcement payload schema](https://developers.binance.com/en/docs/products/announcements/announcement).
+`python -m src.news_monitor --feed-config config/news_feeds.json --candles reports/surge_scan/daily_candles.csv --binance-public-limit 50`
+
+The older authenticated WebSocket adapter remains an optional manual CLI capability only; it is not used by the default GitHub Actions workflow and is not required for the research pipeline. Its documented stream needs credentials, while this public-page collector does not.
