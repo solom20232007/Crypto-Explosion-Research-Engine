@@ -69,7 +69,7 @@ def match_symbols(text,symbols,aliases=None):
  for symbol in symbols:
   base=symbol[:-4] if symbol.endswith("USDT") else symbol
   for term in {base,*[str(x).upper() for x in aliases.get(base,[])]}:
-   if len(term)>=3 and re.search(r"(?<![A-Z0-9])\\$?"+re.escape(term)+r"(?![A-Z0-9])",upper):
+   if len(term)>=3 and re.search(r"(?<![A-Z0-9])\$?"+re.escape(term)+r"(?![A-Z0-9])",upper):
     found.append(symbol); break
  return found
 
