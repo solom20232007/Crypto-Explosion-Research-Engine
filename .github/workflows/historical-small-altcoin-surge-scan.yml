@@ -10,6 +10,8 @@ on:
       - src/prebreakout_dataset.py
       - tests/test_prebreakout_dataset.py
       - src/evaluate_prebreakout.py
+      - src/audit_prebreakout_data.py
+      - tests/test_audit_prebreakout_data.py
   workflow_dispatch:
     inputs:
       start:
@@ -71,6 +73,8 @@ jobs:
         run: python -m src.prebreakout_dataset
       - name: Evaluate chronological baselines and model
         run: python -m src.evaluate_prebreakout
+      - name: Audit historical data quality
+        run: python -m src.audit_prebreakout_data
       - name: Validate outputs
         run: |
           python - <<'PY'
