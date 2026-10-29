@@ -6,7 +6,7 @@ on:
     paths:
       - .github/workflows/historical-small-altcoin-surge-scan.yml
       - src/historical_surge_scanner.py
-      - tests/test_historical_surge_scanner.py
+      - tests/test_historical_surge_scanner.py\n      - src/prebreakout_dataset.py\n      - tests/test_prebreakout_dataset.py
   workflow_dispatch:
     inputs:
       start:
@@ -64,7 +64,7 @@ jobs:
           python -m src.historical_surge_scanner \
             --start "$SCAN_START" --end "$SCAN_END" \
             --max-events "$MAX_EVENTS" "${MAX_ARGS[@]}"
-      - name: Validate outputs
+      - name: Build leakage-safe pre-breakout dataset\n        run: python -m src.prebreakout_dataset\n      - name: Validate outputs
         run: |
           python - <<'PY'
           import json
@@ -73,11 +73,11 @@ jobs:
           root=Path("reports/surge_scan")
           summary=json.loads((root/"surge_scan_summary.json").read_text())
           events=pd.read_csv(root/"surge_events.csv")
-          context=pd.read_csv(root/"surge_pre_event_context.csv")
+          context=pd.read_csv(root/"surge_pre_event_context.csv")\n          daily=pd.read_csv(root/"daily_candles.csv")\n          dataset=pd.read_csv("reports/prebreakout_dataset/prebreakout_dataset.csv")\n          assert len(daily)>0 and len(dataset)>0\n          assert not {"BTCUSDT","ETHUSDT","SOLUSDT"}.intersection(set(dataset.symbol))
           assert summary["symbols_scanned"]>0
           assert not {"BTCUSDT","ETHUSDT","SOLUSDT"}.intersection(set(events.get("symbol",[])))
           print(json.dumps({"symbols_scanned":summary["symbols_scanned"],"event_rows":summary["event_rows"],
-            "selected_events_with_hourly_context":summary["selected_events_with_hourly_context"],
+            "selected_events_with_hourly_context":summary["selected_events_with_hourly_context"],\n            "daily_candle_rows":len(daily),"dataset_rows":len(dataset),
             "failed_symbols":summary["symbols_with_errors"],"context_rows":len(context),
             "survivorship_bias_warning":summary["survivorship_bias_warning"]},indent=2))
           PY
@@ -85,6 +85,6 @@ jobs:
         if: always()
         with:
           name: historical-small-altcoin-surge-scan
-          path: reports/surge_scan/
+          path: |\n            reports/surge_scan/\n            reports/prebreakout_dataset/
           if-no-files-found: warn
           retention-days: 30
