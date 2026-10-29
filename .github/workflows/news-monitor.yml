@@ -3,8 +3,14 @@ on:
   workflow_dispatch:
     inputs:
       feeds:
-        description: "Comma-separated RSS/Atom feed URLs"
-        required: true
+        description: "Optional comma-separated RSS/Atom feed URLs"
+        required: false
+        default: ""
+        type: string
+      feed_config:
+        description: "Curated feed registry JSON"
+        required: false
+        default: "config/news_feeds.json"
         type: string
       candles_path:
         description: "Daily candle CSV path"
