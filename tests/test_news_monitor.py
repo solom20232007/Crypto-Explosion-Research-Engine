@@ -52,3 +52,18 @@ def test_parsed_news_carries_source_provenance():
  assert row["source_name"]=="Example Official"
  assert row["source_tier"]=="official_primary"
  assert row["source_type"]=="project_official"
+
+from src.news_monitor import deduplicate_articles
+
+def test_project_name_and_aliases_match_without_substring_false_positive():
+ assert match_symbols("Avalanche announces a network upgrade",["AVAXUSDT"],{"AVAX":["Avalanche","avax token"]})==["AVAXUSDT"]
+ assert match_symbols("NotAVAXUSDTX is unrelated",["AVAXUSDT"])==[]
+
+def test_cross_source_duplicate_story_keeps_provenance():
+ news=pd.DataFrame([
+  {"title":"ABC announces major upgrade","url":"https://one.example/story","source_name":"One","source_tier":"established","source_type":"media","source_domain":"one.example","published_utc":"2025-01-01T10:00:00Z"},
+  {"title":"ABC announces major upgrade","url":"https://one.example/story","source_name":"Two","source_tier":"official","source_type":"project","source_domain":"two.example","published_utc":"2025-01-01T10:00:00Z"}])
+ result=deduplicate_articles(news)
+ assert len(result)==1
+ assert result.iloc[0]["duplicate_source_count"]==2
+ assert result.iloc[0]["source_name"]=="One|Two"
