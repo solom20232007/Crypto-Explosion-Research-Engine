@@ -40,6 +40,43 @@ def build_dataset(candles: pd.DataFrame) -> pd.DataFrame:
     f["quote_volume_ratio_1d_7d"] = f.quote_volume / f.quote_volume_mean_7d.replace(0, np.nan)
     f["quote_volume_ratio_1d_30d"] = f.quote_volume / f.quote_volume_mean_30d.replace(0, np.nan)
     f["quote_volume_trend_3d_vs_7d"] = g.quote_volume.transform(lambda s: s.shift(1).rolling(3, min_periods=2).mean()) / f.quote_volume_mean_7d.replace(0, np.nan)
+    # Technical momentum/trend features, calculated only from candles available at signal close.
+    f["ema_9"] = g.close.transform(lambda s: s.ewm(span=9, adjust=False, min_periods=9).mean())
+    f["ema_21"] = g.close.transform(lambda s: s.ewm(span=21, adjust=False, min_periods=21).mean())
+    f["ema_50"] = g.close.transform(lambda s: s.ewm(span=50, adjust=False, min_periods=50).mean())
+    f["close_vs_ema9_pct"] = (f.close / f.ema_9 - 1) * 100
+    f["ema9_vs_ema21_pct"] = (f.ema_9 / f.ema_21 - 1) * 100
+    f["ema21_vs_ema50_pct"] = (f.ema_21 / f.ema_50 - 1) * 100
+    f["macd_pct"] = (g.close.transform(lambda s: s.ewm(span=12, adjust=False).mean() - s.ewm(span=26, adjust=False).mean()) / f.close) * 100
+    f["macd_signal_pct"] = (g.close.transform(lambda s: (s.ewm(span=12, adjust=False).mean() - s.ewm(span=26, adjust=False).mean()).ewm(span=9, adjust=False).mean()) / f.close) * 100
+    delta = g.close.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.groupby(f.symbol, sort=False).transform(lambda s: s.ewm(alpha=1/14, adjust=False, min_periods=14).mean())
+    avg_loss = loss.groupby(f.symbol, sort=False).transform(lambda s: s.ewm(alpha=1/14, adjust=False, min_periods=14).mean())
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    f["rsi_14"] = 100 - (100 / (1 + rs))
+    previous_close = g.close.shift(1)
+    true_range = pd.concat([f.high - f.low, (f.high - previous_close).abs(), (f.low - previous_close).abs()], axis=1).max(axis=1)
+    f["atr_14_pct"] = true_range.groupby(f.symbol, sort=False).transform(lambda s: s.ewm(alpha=1/14, adjust=False, min_periods=14).mean()) / f.close * 100
+    rolling_mean = g.close.transform(lambda s: s.rolling(20, min_periods=20).mean())
+    rolling_std = g.close.transform(lambda s: s.rolling(20, min_periods=20).std())
+    f["bollinger_width_20_pct"] = 4 * rolling_std / rolling_mean * 100
+    f["bollinger_position_20"] = (f.close - (rolling_mean - 2 * rolling_std)) / (4 * rolling_std).replace(0, np.nan)
+    f["close_vs_prior_20d_high_pct"] = (f.close / g.high.transform(lambda s: s.shift(1).rolling(20, min_periods=10).max()) - 1) * 100
+    # Liquidity proxies from candle data only; not a substitute for order-book depth/spread.
+    f["quote_volume_median_7d"] = g.quote_volume.transform(lambda s: s.shift(1).rolling(7, min_periods=5).median())
+    f["quote_volume_median_30d"] = g.quote_volume.transform(lambda s: s.shift(1).rolling(30, min_periods=15).median())
+    f["quote_volume_zscore_30d"] = (f.quote_volume - f.quote_volume_mean_30d) / g.quote_volume.transform(lambda s: s.shift(1).rolling(30, min_periods=15).std()).replace(0, np.nan)
+    if "trade_count" in f.columns:
+        f["trade_count_ratio_1d_7d"] = pd.to_numeric(f["trade_count"], errors="coerce") / g.trade_count.transform(lambda s: pd.to_numeric(s, errors="coerce").shift(1).rolling(7, min_periods=5).mean()).replace(0, np.nan)
+    else:
+        f["trade_count_ratio_1d_7d"] = np.nan
+    if "taker_buy_quote_volume" in f.columns:
+        taker_buy = pd.to_numeric(f["taker_buy_quote_volume"], errors="coerce")
+        f["taker_buy_quote_ratio"] = taker_buy / pd.to_numeric(f["quote_volume"], errors="coerce").replace(0, np.nan)
+    else:
+        f["taker_buy_quote_ratio"] = np.nan
     # Labels start strictly after the signal-day close; no same-day high/close enters a target.
     for horizon, threshold in ((1, 25), (3, 40), (7, 75)):
         future_high = g.high.transform(lambda s: pd.concat([s.shift(-i) for i in range(1, horizon + 1)], axis=1).max(axis=1, skipna=False))
