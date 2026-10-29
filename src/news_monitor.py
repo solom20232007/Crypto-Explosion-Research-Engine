@@ -41,7 +41,7 @@ def child_text(el,names):
   if lname(node.tag) in names and node.text: return node.text.strip()
  return ""
 
-def parse_feed(xml_text,source_url,first_seen):
+def parse_feed(xml_text,source_url,first_seen,source_meta=None):
  root=ET.fromstring(xml_text); rows=[]
  entries=[e for e in root.iter() if lname(e.tag) in {"item","entry"}]
  for entry in entries:
@@ -55,7 +55,8 @@ def parse_feed(xml_text,source_url,first_seen):
   if not title: continue
   rows.append({"title":title,"summary":summary,"url":link,"source_domain":urlparse(source_url).netloc.lower(),
    "published_utc":utc_iso(published) if published else "","first_seen_utc":utc_iso(first_seen),
-   "available_at_utc":utc_iso(first_seen),"published_time_missing":published is None,"text":(title+" "+summary).strip()})
+   "available_at_utc":utc_iso(first_seen),"published_time_missing":published is None,"text":(title+" "+summary).strip(),
+   "source_name":(source_meta or {}).get("name",urlparse(source_url).netloc.lower()),"source_tier":(source_meta or {}).get("tier","unrated"),"source_type":(source_meta or {}).get("type","media")})
  return rows
 
 def classify(text):
@@ -73,13 +74,25 @@ def match_symbols(text,symbols,aliases=None):
     found.append(symbol); break
  return found
 
+def load_feed_config(path):
+ data=json.loads(Path(path).read_text(encoding="utf-8"))
+ sources=data.get("sources",[])
+ enabled=[x for x in sources if x.get("enabled",True)]
+ if not enabled: raise ValueError("Feed config has no enabled sources")
+ for source in enabled:
+  if not source.get("url","").startswith(("https://","http://")):
+   raise ValueError(f"Invalid feed URL for source: {source.get('name','unnamed')}")
+ return enabled
+
 def collect_feeds(feed_urls,session=requests,now=None):
  seen=now or datetime.now(timezone.utc); rows=[]; errors=[]
- for url in feed_urls:
+ for item in feed_urls:
+  meta=item if isinstance(item,dict) else {"url":item}
+  url=meta["url"]
   try:
    response=session.get(url,timeout=20,headers={"User-Agent":"PreBreakoutResearchBot/1.0"})
-   response.raise_for_status(); rows.extend(parse_feed(response.text,url,seen))
-  except Exception as exc: errors.append({"feed":url,"error":str(exc)})
+   response.raise_for_status(); rows.extend(parse_feed(response.text,url,seen,meta))
+  except Exception as exc: errors.append({"feed":url,"source_name":meta.get("name",url),"error":str(exc)})
  return rows,errors
 
 def build_symbol_features(news,candles,aliases=None):
@@ -131,8 +144,9 @@ def run(feed_urls,candle_path,aliases_path=None,output_dir=OUT):
 def main():
  p=argparse.ArgumentParser(); p.add_argument("--candles",default="reports/surge_scan/daily_candles.csv")
  p.add_argument("--aliases",default=""); p.add_argument("--output-dir",default=str(OUT))
- p.add_argument("--feeds",default=os.getenv("NEWS_FEED_URLS","")); a=p.parse_args()
+ p.add_argument("--feeds",default=os.getenv("NEWS_FEED_URLS","")); p.add_argument("--feed-config",default=""); a=p.parse_args()
  feeds=[x.strip() for x in a.feeds.split(",") if x.strip()]
- if not feeds: p.error("Provide --feeds or NEWS_FEED_URLS (comma-separated RSS/Atom URLs)")
+ if a.feed_config: feeds=load_feed_config(a.feed_config)
+ if not feeds: p.error("Provide --feeds, --feed-config, or NEWS_FEED_URLS")
  print(json.dumps(run(feeds,a.candles,a.aliases or None,Path(a.output_dir)),indent=2))
 if __name__=="__main__": main()
