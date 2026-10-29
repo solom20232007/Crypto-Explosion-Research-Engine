@@ -33,7 +33,7 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
       - name: Collect timestamp-safe news
-        run: python -m src.news_monitor --feeds "${{ inputs.feeds }}" --candles "${{ inputs.candles_path }}"
+        run: python -m src.news_monitor --feed-config "${{ inputs.feed_config }}" --feeds "${{ inputs.feeds }}" --candles "${{ inputs.candles_path }}"
       - name: Upload news research artifact
         uses: actions/upload-artifact@v4
         with:
