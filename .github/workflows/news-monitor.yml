@@ -12,11 +12,6 @@ on:
         required: false
         default: "config/news_feeds.json"
         type: string
-      binance_ws_seconds:
-        description: "Optional live Binance official announcements collection window in seconds (requires repository secrets)"
-        required: false
-        default: "0"
-        type: string
       candles_path:
         description: "Daily candle CSV path"
         required: true
@@ -43,11 +38,8 @@ jobs:
           pip install pytest
       - name: Run tests
         run: python -m pytest -q
-      - name: Collect timestamp-safe news
-        env:
-          BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
-          BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}
-        run: python -m src.news_monitor --feed-config "${{ inputs.feed_config }}" --feeds "${{ inputs.feeds }}" --candles "${{ inputs.candles_path }}" --binance-ws-seconds "${{ inputs.binance_ws_seconds }}"
+      - name: Collect timestamp-safe news (including public Binance announcements)
+        run: python -m src.news_monitor --feed-config "${{ inputs.feed_config }}" --feeds "${{ inputs.feeds }}" --candles "${{ inputs.candles_path }}" --binance-public-limit 50
       - name: Upload news research artifact
         uses: actions/upload-artifact@v4
         with:
