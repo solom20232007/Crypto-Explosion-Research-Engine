@@ -65,14 +65,44 @@ def classify(text):
  score=int(any(t in low for t in POSITIVE))-int(any(t in low for t in NEGATIVE))
  return "|".join(cats) if cats else "general",score
 
+def _terms_for_symbol(symbol,aliases):
+ base=symbol[:-4] if symbol.endswith("USDT") else symbol
+ values=aliases.get(base,[])
+ if isinstance(values,str): values=[values]
+ terms={base}
+ for value in values:
+  if isinstance(value,dict):
+   terms.update(str(x).upper() for x in value.get("aliases",[]) if x)
+   if value.get("name"): terms.add(str(value["name"]).upper())
+  else: terms.add(str(value).upper())
+ return {x.strip() for x in terms if len(x.strip())>=3}
+
 def match_symbols(text,symbols,aliases=None):
  aliases=aliases or {}; upper=text.upper(); found=[]
  for symbol in symbols:
-  base=symbol[:-4] if symbol.endswith("USDT") else symbol
-  for term in {base,*[str(x).upper() for x in aliases.get(base,[])]}:
-   if len(term)>=3 and re.search(r"(?<![A-Z0-9])\$?"+re.escape(term)+r"(?![A-Z0-9])",upper):
+  for term in _terms_for_symbol(symbol,aliases):
+   if re.search(r"(?<![A-Z0-9])\\$?"+re.escape(term)+r"(?![A-Z0-9])",upper):
     found.append(symbol); break
  return found
+
+def deduplicate_articles(news):
+ """Collapse cross-publisher copies while retaining all source provenance."""
+ if news.empty: return news
+ frame=news.copy()
+ frame["_url_key"]=frame.get("url",pd.Series("",index=frame.index)).fillna("").astype(str).str.lower().str.rstrip("/")
+ frame["_title_key"]=frame.get("title",pd.Series("",index=frame.index)).fillna("").astype(str).str.lower()
+ frame["_title_key"]=frame["_title_key"].str.replace(r"[^a-z0-9]+"," ",regex=True).str.strip()
+ frame["_published_key"]=pd.to_datetime(frame.get("published_utc",pd.Series("",index=frame.index)),utc=True,errors="coerce").dt.floor("D")
+ frame["_dedup_key"]=frame["_url_key"].where(frame["_url_key"]!="",frame["_title_key"]+"|"+frame["_published_key"].astype(str))
+ rows=[]
+ for _,group in frame.groupby("_dedup_key",dropna=False,sort=False):
+  row=group.iloc[0].drop(labels=["_url_key","_title_key","_published_key","_dedup_key"]).to_dict()
+  for col in ("source_name","source_tier","source_type","source_domain"):
+   vals=sorted({str(x) for x in group[col].dropna() if str(x)})
+   row[col]="|".join(vals) if vals else row.get(col,"")
+  row["duplicate_source_count"]=len(group)
+  rows.append(row)
+ return pd.DataFrame(rows)
 
 def load_feed_config(path):
  data=json.loads(Path(path).read_text(encoding="utf-8"))
@@ -128,13 +158,18 @@ def run(feed_urls,candle_path,aliases_path=None,output_dir=OUT):
  candles=pd.read_csv(candle_path); aliases=json.loads(Path(aliases_path).read_text()) if aliases_path else {}
  raw,errors=collect_feeds(feed_urls)
  for item in raw: item["category"],item["sentiment_hint"]=classify(item["text"])
- news=pd.DataFrame(raw)
- if not news.empty: news=news.drop_duplicates(subset=["url","title","source_domain"])
+ news=deduplicate_articles(pd.DataFrame(raw))
+ if not news.empty:
+  classified=news["text"].fillna("").map(classify)
+  news["category"]=[x[0] for x in classified]
+  news["sentiment_hint"]=[x[1] for x in classified]
  features=build_symbol_features(news,candles,aliases)
  output_dir.mkdir(parents=True,exist_ok=True)
  news.to_csv(output_dir/"news_events.csv",index=False)
  features.to_csv(output_dir/"news_symbol_daily_features.csv",index=False)
  summary={"feeds_requested":len(feed_urls),"articles_collected":len(news),"symbol_feature_rows":len(features),"feed_errors":errors,
+  "unique_stories_after_deduplication":len(news),
+  "duplicate_source_copies_collapsed":int(news.get("duplicate_source_count",pd.Series(dtype=int)).sum()-len(news)) if not news.empty else 0,
   "availability_rule":"first_seen_utc; article excluded before first_seen_utc",
   "limitations":["RSS coverage is source-dependent","ticker matching can miss aliases or create false matches",
    "keyword sentiment is a triage hint, not a verified model","historical first-seen times cannot be reconstructed from a current feed snapshot"]}
