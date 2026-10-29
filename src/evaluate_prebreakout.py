@@ -15,6 +15,11 @@ FEATURES = [
     "range_pct", "body_pct", "close_location", "upper_wick_pct", "lower_wick_pct",
     "range_mean_7d_pct", "range_mean_30d_pct", "volatility_ratio_7d_30d",
     "quote_volume_ratio_1d_7d", "quote_volume_ratio_1d_30d", "quote_volume_trend_3d_vs_7d",
+    "close_vs_ema9_pct", "ema9_vs_ema21_pct", "ema21_vs_ema50_pct", "macd_pct",
+    "macd_signal_pct", "rsi_14", "atr_14_pct", "bollinger_width_20_pct",
+    "bollinger_position_20", "close_vs_prior_20d_high_pct",
+    "quote_volume_median_7d", "quote_volume_median_30d", "quote_volume_zscore_30d",
+    "trade_count_ratio_1d_7d", "taker_buy_quote_ratio",
 ]
 TARGETS = ["explosion_1d", "explosion_3d", "explosion_7d"]
 
