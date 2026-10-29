@@ -34,6 +34,18 @@ class PrebreakoutDatasetTests(unittest.TestCase):
         self.assertEqual(report["symbols"], 1)
         self.assertIn("train", report["chronological_splits"])
 
+    def test_technical_and_liquidity_features_are_added(self):
+        data = build_dataset(self.candles(80))
+        expected = {
+            "rsi_14", "ema9_vs_ema21_pct", "macd_pct", "atr_14_pct",
+            "bollinger_width_20_pct", "close_vs_prior_20d_high_pct",
+            "quote_volume_zscore_30d", "trade_count_ratio_1d_7d",
+            "taker_buy_quote_ratio",
+        }
+        self.assertTrue(expected.issubset(set(data.columns)))
+        finite_rsi = data["rsi_14"].dropna()
+        self.assertTrue(((finite_rsi >= 0) & (finite_rsi <= 100)).all())
+
     def test_requires_required_columns(self):
         with self.assertRaises(ValueError):
             build_dataset(pd.DataFrame({"symbol": ["XYZUSDT"]}))
