@@ -164,27 +164,54 @@ class BitqueryClient:
         self.session = session or requests.Session()
 
     def query(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+        # Bitquery may occasionally close an otherwise valid connection. Retry
+        # transport failures as well as throttling/transient 5xx responses.
         response = None
-        for attempt in range(4):
-            response = self.session.post(
-                BITQUERY_URL,
-                headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
-                json={"query": query, "variables": variables},
-                timeout=60,
-            )
+        last_error: Exception | None = None
+        max_attempts = 6
+        for attempt in range(max_attempts):
+            try:
+                response = self.session.post(
+                    BITQUERY_URL,
+                    headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
+                    json={"query": query, "variables": variables},
+                    timeout=(15, 90),
+                )
+                last_error = None
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+                response = None
+                last_error = exc
+                if attempt == max_attempts - 1:
+                    break
+                delay = min(60, 5 * (2 ** attempt))
+                print(
+                    f"Bitquery transport error ({type(exc).__name__}); "
+                    f"retry {attempt + 1}/{max_attempts - 1} in {delay}s",
+                    flush=True,
+                )
+                time.sleep(delay)
+                continue
+
             if response.status_code not in (429, 500, 502, 503, 504):
                 break
-            if attempt < 3:
+            if attempt < max_attempts - 1:
                 retry_after = response.headers.get("Retry-After")
                 try:
-                    delay = max(10, min(120, int(retry_after))) if retry_after else 30 * (attempt + 1)
-                except ValueError:
-                    delay = 30 * (attempt + 1)
+                    delay = max(5, min(120, int(retry_after))) if retry_after else min(60, 5 * (2 ** attempt))
+                except (TypeError, ValueError):
+                    delay = min(60, 5 * (2 ** attempt))
+                print(
+                    f"Bitquery HTTP {response.status_code}; "
+                    f"retry {attempt + 1}/{max_attempts - 1} in {delay}s",
+                    flush=True,
+                )
                 time.sleep(delay)
-        if response is None or not response.ok:
-            status = response.status_code if response is not None else "no-response"
-            body = response.text[:500] if response is not None else ""
-            raise RuntimeError(f"Bitquery HTTP {status}: {body}")
+
+        if response is None:
+            raise RuntimeError(f"Bitquery connection failed after {max_attempts} attempts: {last_error}")
+        if not response.ok:
+            body = response.text[:500]
+            raise RuntimeError(f"Bitquery HTTP {response.status_code} after {max_attempts} attempts: {body}")
         payload = response.json()
         if payload.get("errors"):
             raise RuntimeError(f"Bitquery GraphQL error: {payload['errors'][:2]}")
