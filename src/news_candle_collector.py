@@ -59,6 +59,11 @@ def collect_recent_daily_candles(output_path="reports/surge_scan/daily_candles.c
     }
     summary_path = path.parent / "news_candle_collection_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    artifact_dir = Path("reports/news_monitor")
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    (artifact_dir / "news_candle_collection_summary.json").write_text(
+        json.dumps(summary, indent=2), encoding="utf-8"
+    )
     print(json.dumps(summary, indent=2))
     return summary
 
