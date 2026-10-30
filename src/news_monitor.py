@@ -288,55 +288,6 @@ def collect_binance_announcements(api_key,api_secret,duration_seconds=60,now_fn=
  return rows
 
 
-def build_signal_time_features(news, signals, aliases=None):
- """Build point-in-time news features for actual scanner signal timestamps.
-
- Signals must contain symbol and signal_time_utc. News availability is based on
- available_at_utc, falling back to first_seen_utc only for legacy event files.
- Published timestamps are deliberately never used as availability timestamps.
- """
- required={"symbol","signal_time_utc"}
- missing=required-set(signals.columns)
- if missing:
-  raise ValueError(f"signals missing columns: {sorted(missing)}")
- n=news.copy()
- if n.empty:
-  n=pd.DataFrame(columns=["text","first_seen_utc","available_at_utc","category","sentiment_hint"])
- availability_col="available_at_utc" if "available_at_utc" in n.columns else "first_seen_utc"
- if availability_col not in n.columns:
-  raise ValueError("news must contain available_at_utc or first_seen_utc")
- n["available_at"]=pd.to_datetime(n[availability_col],utc=True,errors="coerce")
- n["category"]=n.get("category",pd.Series("general",index=n.index)).fillna("general")
- n["sentiment_hint"]=pd.to_numeric(n.get("sentiment_hint",pd.Series(0,index=n.index)),errors="coerce").fillna(0)
- n["text"]=n.get("text",pd.Series("",index=n.index)).fillna("")
- symbols=sorted(set(signals.symbol.dropna().astype(str)))
- matched=[]
- for _,item in n.dropna(subset=["available_at"]).iterrows():
-  for symbol in match_symbols(str(item.get("text","")),symbols,aliases):
-   matched.append({**item.to_dict(),"matched_symbol":symbol})
- m=pd.DataFrame(matched)
- results=[]
- s=signals.copy()
- s["signal_time"]=pd.to_datetime(s["signal_time_utc"],utc=True,errors="coerce")
- if s["signal_time"].isna().any():
-  raise ValueError("signals contains invalid signal_time_utc values")
- if s["symbol"].isna().any():
-  raise ValueError("signals contains empty symbols")
- for row in s.itertuples(index=False):
-  signal=row.signal_time
-  subset=m[(m.matched_symbol==str(row.symbol))&(m.available_at<signal)] if not m.empty else m
-  r24=subset[subset.available_at>=signal-pd.Timedelta(hours=24)]
-  r7=subset[subset.available_at>=signal-pd.Timedelta(days=7)]
-  cats=r7.category.astype(str)
-  results.append({"symbol":str(row.symbol),"signal_time_utc":signal.isoformat().replace("+00:00","Z"),
-   "news_count_24h":len(r24),"news_count_7d":len(r7),
-   "exchange_announcement_count_7d":cats.str.contains("exchange_announcement").sum(),
-   "token_unlock_count_7d":cats.str.contains("token_unlock").sum(),
-   "security_news_count_7d":cats.str.contains("security").sum(),
-   "positive_news_hint_count_7d":(r7.sentiment_hint>0).sum(),
-   "negative_news_hint_count_7d":(r7.sentiment_hint<0).sum()})
- return pd.DataFrame(results)
-
 def _supabase_request(url, key, method, table, *, params=None, rows=None, prefer=None, offset=None, limit=1000):
  headers={"apikey":key,"Authorization":f"Bearer {key}","Content-Type":"application/json"}
  if prefer: headers["Prefer"]=prefer
