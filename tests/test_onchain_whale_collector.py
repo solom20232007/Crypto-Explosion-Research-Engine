@@ -1,4 +1,4 @@
-from datetime import timezone\n\nfrom src.onchain_whale_collector import (
+from datetime import datetime, timezone\n\nfrom src.onchain_whale_collector import (
     EVM_QUERY,
     SOLANA_QUERY,
     BitqueryClient,
