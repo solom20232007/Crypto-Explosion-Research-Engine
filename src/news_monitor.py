@@ -287,7 +287,57 @@ def collect_binance_announcements(api_key,api_secret,duration_seconds=60,now_fn=
   except Exception: pass
  return rows
 
-def run(feed_urls,candle_path,aliases_path=None,output_dir=OUT,extra_articles=None,extra_errors=None):
+
+def build_signal_time_features(news, signals, aliases=None):
+ """Build point-in-time news features for actual scanner signal timestamps.
+
+ Signals must contain symbol and signal_time_utc. News availability is based on
+ available_at_utc, falling back to first_seen_utc only for legacy event files.
+ Published timestamps are deliberately never used as availability timestamps.
+ """
+ required={"symbol","signal_time_utc"}
+ missing=required-set(signals.columns)
+ if missing:
+  raise ValueError(f"signals missing columns: {sorted(missing)}")
+ n=news.copy()
+ if n.empty:
+  n=pd.DataFrame(columns=["text","first_seen_utc","available_at_utc","category","sentiment_hint"])
+ availability_col="available_at_utc" if "available_at_utc" in n.columns else "first_seen_utc"
+ if availability_col not in n.columns:
+  raise ValueError("news must contain available_at_utc or first_seen_utc")
+ n["available_at"]=pd.to_datetime(n[availability_col],utc=True,errors="coerce")
+ n["category"]=n.get("category",pd.Series("general",index=n.index)).fillna("general")
+ n["sentiment_hint"]=pd.to_numeric(n.get("sentiment_hint",pd.Series(0,index=n.index)),errors="coerce").fillna(0)
+ n["text"]=n.get("text",pd.Series("",index=n.index)).fillna("")
+ symbols=sorted(set(signals.symbol.dropna().astype(str)))
+ matched=[]
+ for _,item in n.dropna(subset=["available_at"]).iterrows():
+  for symbol in match_symbols(str(item.get("text","")),symbols,aliases):
+   matched.append({**item.to_dict(),"matched_symbol":symbol})
+ m=pd.DataFrame(matched)
+ results=[]
+ s=signals.copy()
+ s["signal_time"]=pd.to_datetime(s["signal_time_utc"],utc=True,errors="coerce")
+ if s["signal_time"].isna().any():
+  raise ValueError("signals contains invalid signal_time_utc values")
+ if s["symbol"].isna().any():
+  raise ValueError("signals contains empty symbols")
+ for row in s.itertuples(index=False):
+  signal=row.signal_time
+  subset=m[(m.matched_symbol==str(row.symbol))&(m.available_at<signal)] if not m.empty else m
+  r24=subset[subset.available_at>=signal-pd.Timedelta(hours=24)]
+  r7=subset[subset.available_at>=signal-pd.Timedelta(days=7)]
+  cats=r7.category.astype(str)
+  results.append({"symbol":str(row.symbol),"signal_time_utc":signal.isoformat().replace("+00:00","Z"),
+   "news_count_24h":len(r24),"news_count_7d":len(r7),
+   "exchange_announcement_count_7d":cats.str.contains("exchange_announcement").sum(),
+   "token_unlock_count_7d":cats.str.contains("token_unlock").sum(),
+   "security_news_count_7d":cats.str.contains("security").sum(),
+   "positive_news_hint_count_7d":(r7.sentiment_hint>0).sum(),
+   "negative_news_hint_count_7d":(r7.sentiment_hint<0).sum()})
+ return pd.DataFrame(results)
+
+def run(feed_urls,candle_path,aliases_path=None,output_dir=OUT,extra_articles=None,extra_errors=None,signals_path=None):
  candles=pd.read_csv(candle_path); aliases=json.loads(Path(aliases_path).read_text()) if aliases_path else {}
  raw,errors=collect_feeds(feed_urls)
  raw.extend(extra_articles or [])
@@ -302,6 +352,14 @@ def run(feed_urls,candle_path,aliases_path=None,output_dir=OUT,extra_articles=No
  output_dir.mkdir(parents=True,exist_ok=True)
  news.to_csv(output_dir/"news_events.csv",index=False)
  features.to_csv(output_dir/"news_symbol_daily_features.csv",index=False)
+ if signals_path:
+  signal_file=Path(signals_path)
+  if signal_file.exists():
+   signals=pd.read_csv(signal_file)
+   signal_features=build_signal_time_features(news,signals,aliases)
+   signal_features.to_csv(output_dir/"news_symbol_signal_features.csv",index=False)
+  else:
+   raise FileNotFoundError(f"Signal-time input file not found: {signal_file}")
  summary={"feeds_requested":len(feed_urls),"articles_collected":len(news),"symbol_feature_rows":len(features),"feed_errors":errors,
   "unique_stories_after_deduplication":len(news),
   "duplicate_source_copies_collapsed":int(news.get("duplicate_source_count",pd.Series(dtype=int)).sum()-len(news)) if not news.empty else 0,
@@ -315,7 +373,7 @@ def main():
  p=argparse.ArgumentParser(); p.add_argument("--candles",default="reports/surge_scan/daily_candles.csv")
  p.add_argument("--aliases",default=""); p.add_argument("--output-dir",default=str(OUT))
  p.add_argument("--feeds",default=os.getenv("NEWS_FEED_URLS","")); p.add_argument("--feed-config",default=""); p.add_argument("--binance-public-limit",type=int,default=50); p.add_argument("--binance-ws-seconds",type=int,default=0)
- p.add_argument("--candle-days",type=int,default=30); a=p.parse_args()
+ p.add_argument("--candle-days",type=int,default=30); p.add_argument("--signals",default=""); a=p.parse_args()
  feeds=[x.strip() for x in a.feeds.split(",") if x.strip()]
  if a.feed_config:
   configured=load_feed_config(a.feed_config)
@@ -340,5 +398,5 @@ def main():
   candles=pd.read_csv(candle_path)
  if candles.empty or not {"symbol","open_time"}.issubset(candles.columns):
   raise RuntimeError(f"Daily candle input is empty or invalid: {candle_path}")
- print(json.dumps(run(feeds,candle_path,a.aliases or None,Path(a.output_dir),extra_articles,public_errors),indent=2))
+ print(json.dumps(run(feeds,candle_path,a.aliases or None,Path(a.output_dir),extra_articles,public_errors,a.signals or None),indent=2))
 if __name__=="__main__": main()
