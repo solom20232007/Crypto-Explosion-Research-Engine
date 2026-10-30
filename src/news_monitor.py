@@ -141,7 +141,13 @@ def build_symbol_features(news,candles,aliases=None):
  for _,item in n.iterrows():
   for symbol in match_symbols(str(item.get("text","")),symbols,aliases):
    matched.append({**item.to_dict(),"symbol":symbol})
- m=pd.DataFrame(matched); results=[]
+ m=pd.DataFrame(matched)
+ # Re-normalize after row-dict reconstruction: an all-NaT column can lose
+ # its timezone dtype when pandas builds the matched DataFrame.
+ if not m.empty:
+  m["available_at"]=pd.to_datetime(m["available_at"],utc=True,errors="coerce")
+  m["published_at"]=pd.to_datetime(m["published_at"],utc=True,errors="coerce")
+ results=[]
  for row in candles[["symbol","open_time"]].drop_duplicates().itertuples(index=False):
   signal=pd.to_datetime(row.open_time,unit="ms",utc=True)+pd.Timedelta(days=1)
   subset=m[m.symbol==row.symbol].copy() if not m.empty else m.copy()
