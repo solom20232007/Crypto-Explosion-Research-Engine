@@ -4,3 +4,4 @@ requests>=2.31
 PyYAML>=6.0
 scikit-learn>=1.5
 joblib>=1.4
+websocket-client>=1.8
