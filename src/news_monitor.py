@@ -372,11 +372,13 @@ def upload_news_to_supabase(news, supabase_url=None, secret_key=None):
  # Recompute symbol matches so newly added event symbols can match previously archived stories.
  for row in persisted_news:
   text_value=(str(row.get("title") or "")+" "+str(row.get("summary") or "")).strip()
-  row["matched_symbols"]=match_symbols(text_value,symbols,aliases)
- for row in persisted_news:
-  _supabase_request(url,key,"PATCH","news_events",
-   params={"id":f"eq.{row['id']}"},rows={"matched_symbols":row["matched_symbols"]},
-   prefer="return=minimal")
+  matched=match_symbols(text_value,symbols,aliases)
+  previous=sorted(set(row.get("matched_symbols") or []))
+  row["matched_symbols"]=matched
+  if matched!=previous:
+   _supabase_request(url,key,"PATCH","news_events",
+    params={"id":f"eq.{row['id']}"},rows={"matched_symbols":matched},
+    prefer="return=minimal")
  # Compute each feature row against the actual persisted explosion-event timestamp.
  news_by_id=[(row,row["id"]) for row in persisted_news]
  feature_rows=[]
