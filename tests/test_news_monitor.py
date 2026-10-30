@@ -67,3 +67,47 @@ def test_cross_source_duplicate_story_keeps_provenance():
  assert len(result)==1
  assert result.iloc[0]["duplicate_source_count"]==2
  assert result.iloc[0]["source_name"]=="One|Two"
+
+
+from src.news_monitor import build_signal_time_features
+
+def test_signal_time_features_use_first_seen_and_exclude_late_news():
+ news=pd.DataFrame([
+  {"text":"$ABC Binance listing","available_at_utc":"2024-10-02T09:00:00Z","first_seen_utc":"2024-10-02T09:00:00Z","category":"exchange_announcement","sentiment_hint":1},
+  {"text":"$ABC token unlock","available_at_utc":"2024-10-02T10:00:00Z","first_seen_utc":"2024-10-02T10:00:00Z","category":"token_unlock","sentiment_hint":-1},
+  {"text":"$ABC security incident","available_at_utc":"2024-10-02T11:00:00Z","first_seen_utc":"2024-10-02T11:00:00Z","category":"security","sentiment_hint":-1},
+ ])
+ signals=pd.DataFrame([
+  {"symbol":"ABCUSDT","signal_time_utc":"2024-10-02T10:30:00Z"},
+  {"symbol":"ABCUSDT","signal_time_utc":"2024-10-02T11:00:00Z"},
+ ])
+ result=build_signal_time_features(news,signals).set_index("signal_time_utc")
+ first=result.loc["2024-10-02T10:30:00Z"]
+ assert first["news_count_24h"]==2
+ assert first["exchange_announcement_count_7d"]==1
+ assert first["token_unlock_count_7d"]==1
+ assert first["security_news_count_7d"]==0
+ second=result.loc["2024-10-02T11:00:00Z"]
+ # A story first seen at exactly the signal timestamp is excluded conservatively.
+ assert second["news_count_24h"]==2
+ assert second["security_news_count_7d"]==0
+
+def test_signal_time_features_do_not_use_published_time_as_availability():
+ news=pd.DataFrame([{
+  "text":"$ABC partnership",
+  "published_utc":"2024-10-01T08:00:00Z",
+  "first_seen_utc":"2024-10-02T12:00:00Z",
+  "available_at_utc":"2024-10-02T12:00:00Z",
+  "category":"partnership","sentiment_hint":1
+ }])
+ signals=pd.DataFrame([{"symbol":"ABCUSDT","signal_time_utc":"2024-10-02T11:59:00Z"}])
+ result=build_signal_time_features(news,signals)
+ assert result.iloc[0]["news_count_7d"]==0
+
+def test_signal_time_features_require_explicit_signal_timestamps():
+ signals=pd.DataFrame([{"symbol":"ABCUSDT","timestamp":"2024-10-02T12:00:00Z"}])
+ try:
+  build_signal_time_features(pd.DataFrame(),signals)
+  assert False, "missing signal_time_utc should fail"
+ except ValueError as exc:
+  assert "signal_time_utc" in str(exc)
