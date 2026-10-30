@@ -1,4 +1,4 @@
-from src.onchain_whale_collector import (
+from datetime import timezone\n\nfrom src.onchain_whale_collector import (
     EVM_QUERY,
     SOLANA_QUERY,
     BitqueryClient,
@@ -72,8 +72,39 @@ def test_fetch_chain_keeps_rows_with_missing_or_small_usd_and_deduplicates():
     assert rows[0]["amount_usd"] == 0.02
 
 
-def test_fetch_chain_fails_instead_of_silently_truncating():
-    class FullPageClient(BitqueryClient):
+def test_fetch_chain_splits_dense_intervals_instead_of_truncating():
+    from datetime import datetime
+
+    item = {
+        "Block": {"Time": "2026-10-31T10:00:00Z", "Number": 123},
+        "Transaction": {"Hash": "0xsplit"},
+        "Transfer": {
+            "Index": 1, "Amount": "2", "AmountInUSD": None,
+            "Sender": "0xfrom", "Receiver": "0xto",
+            "Currency": {"Symbol": "TINY", "SmartContract": "0xtiny", "Decimals": 18},
+        },
+    }
+
+    class DenseThenSparseClient(BitqueryClient):
+        def __init__(self):
+            self.calls = 0
+
+        def query(self, query, variables):
+            self.calls += 1
+            assert variables["since"] < variables["till"]
+            if self.calls == 1:
+                return {"EVM": {"Transfers": [{}] * 1000}}
+            return {"EVM": {"Transfers": [item]}}
+
+    client = DenseThenSparseClient()
+    rows = client.fetch_chain("ethereum", hours=1, max_pages=1)
+    assert client.calls > 1
+    assert len(rows) == 1
+    assert rows[0]["tx_hash"] == "0xsplit"
+
+
+def test_fetch_chain_raises_when_one_second_interval_is_still_capped():
+    class PermanentlyDenseClient(BitqueryClient):
         def __init__(self):
             pass
 
@@ -81,11 +112,16 @@ def test_fetch_chain_fails_instead_of_silently_truncating():
             return {"EVM": {"Transfers": [{}] * 1000}}
 
     try:
-        FullPageClient().fetch_chain("ethereum", hours=1, max_pages=1)
+        PermanentlyDenseClient()._fetch_interval(
+            "ethereum", EVM_QUERY.replace("NETWORK_PLACEHOLDER", "eth"), "EVM",
+            datetime(2026, 10, 31, 10, 0, 0, tzinfo=timezone.utc),
+            datetime(2026, 10, 31, 10, 0, 1, tzinfo=timezone.utc),
+            max_pages=1,
+        )
     except RuntimeError as exc:
-        assert "incomplete" in str(exc)
+        assert "cannot guarantee complete collection" in str(exc)
     else:
-        raise AssertionError("Expected explicit truncation error")
+        raise AssertionError("Expected explicit minimum-window truncation error")
 
 
 def test_missing_transfer_endpoints_are_skipped():
