@@ -1,14 +1,8 @@
 name: On-chain All-Token Transfer Collector
 
 on:
-  push:
-    branches:
-      - research/binance-prebreakout-advisor-v1
-    paths:
-      - '.github/workflows/onchain-whale-collector.yml'
-      - 'src/onchain_whale_collector.py'
-      - 'tests/test_onchain_whale_collector.py'
-      - 'config/onchain_whale_chains.json'
+  # Temporarily manual-only while the Bitquery free-plan quota is exhausted.
+  # Restore the schedule after the quota reset date is confirmed.
   workflow_dispatch:
     inputs:
       lookback_hours:
@@ -21,8 +15,6 @@ on:
         required: false
         default: "100"
         type: string
-  schedule:
-    - cron: "17,47 * * * *"
 
 permissions:
   contents: read
