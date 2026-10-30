@@ -41,6 +41,11 @@ def collect_recent_daily_candles(output_path="reports/surge_scan/daily_candles.c
     result = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=columns)
     if result.empty:
         raise RuntimeError("Binance daily-candle collection returned zero rows; refusing to create empty features")
+    # Do not emit the currently forming 1d candle: its OHLCV values are incomplete.
+    result["open_time"] = pd.to_numeric(result["open_time"], errors="coerce")
+    result = result[result["open_time"] + 86_400_000 <= end_ms]
+    if result.empty:
+        raise RuntimeError("No fully closed daily candles were returned; refusing to create empty features")
     result = result.drop_duplicates(["symbol", "open_time"]).sort_values(["symbol", "open_time"])
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
