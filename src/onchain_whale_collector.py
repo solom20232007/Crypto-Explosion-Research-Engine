@@ -239,7 +239,7 @@ class BitqueryClient:
         # event keys are deduplicated before upload.
         overlap = min(1.0, duration / 100.0)
         left_end = min(end, midpoint + timedelta(seconds=overlap))
-        right_start = max(start, midpoint - __import__("datetime").timedelta(seconds=overlap))
+        right_start = max(start, midpoint - timedelta(seconds=overlap))
         left = self._fetch_interval(chain, query, root, start, left_end, max_pages, min_interval_seconds, depth + 1)
         right = self._fetch_interval(chain, query, root, right_start, end, max_pages, min_interval_seconds, depth + 1)
         for row in right:
@@ -256,7 +256,7 @@ class BitqueryClient:
         )
         root = "Solana" if chain == "solana" else "EVM"
         end = datetime.now(timezone.utc)
-        start = end - __import__("datetime").timedelta(hours=hours)
+        start = end - timedelta(hours=hours)
         return self._fetch_interval(chain, query, root, start, end, max_pages)
 
 
