@@ -1,7 +1,8 @@
-"""Bitquery large-transfer collector for on-chain whale research.
+"""All-token on-chain transfer collector for research.
 
-This is a research feed, not a trade-direction classifier. It stores only
-provider-valued large transfers and preserves first-observed timestamps.
+Collects provider-visible fungible/native transfers without a USD-value filter.
+USD estimates are retained as optional metadata only; they never determine
+whether an event is collected. This feed does not infer buy/sell direction.
 """
 from __future__ import annotations
 
@@ -10,24 +11,23 @@ import json
 import os
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 import requests
 
 BITQUERY_URL = "https://streaming.bitquery.io/graphql"
 PROVIDER = "bitquery_v2"
-DEFAULT_MIN_USD = 100_000
-LOOKBACK_HOURS = 3
+LOOKBACK_HOURS = 1
 PAGE_SIZE = 1000
+MAX_PAGES = 100
 
 EVM_QUERY = """
-query WhaleTransfers($minUsd: String!, $hoursAgo: Int!, $limit: Int!, $offset: Int!) {
+query AllTokenTransfers($hoursAgo: Int!, $limit: Int!, $offset: Int!) {
   EVM(dataset: realtime, network: NETWORK_PLACEHOLDER) {
     Transfers(
       where: {
         Block: {Time: {since_relative: {hours_ago: $hoursAgo}}}
-        Transfer: {AmountInUSD: {gt: $minUsd}, Success: true}
+        Transfer: {Success: true}
       }
       limit: {count: $limit, offset: $offset}
       orderBy: {descending: Block_Time}
@@ -44,12 +44,11 @@ query WhaleTransfers($minUsd: String!, $hoursAgo: Int!, $limit: Int!, $offset: I
 """
 
 SOLANA_QUERY = """
-query WhaleTransfers($minUsd: String!, $hoursAgo: Int!, $limit: Int!, $offset: Int!) {
+query AllTokenTransfers($hoursAgo: Int!, $limit: Int!, $offset: Int!) {
   Solana(dataset: realtime) {
     Transfers(
       where: {
         Block: {Time: {since_relative: {hours_ago: $hoursAgo}}}
-        Transfer: {AmountInUSD: {gt: $minUsd}}
       }
       limit: {count: $limit, offset: $offset}
       orderBy: {descending: Block_Time}
@@ -95,8 +94,6 @@ def normalize_evm_transfer(item: dict[str, Any], chain: str) -> dict[str, Any] |
         return None
     index = transfer.get("Index")
     if index is None:
-        # Keep a deterministic transaction-level fallback; collisions are
-        # avoided by including the transfer endpoints in the fallback index.
         index = tx.get("Index", 0)
     native = currency.get("Native") is True
     address = currency.get("SmartContract") or ("native:eth" if chain == "ethereum" else "native:bnb")
@@ -193,15 +190,16 @@ class BitqueryClient:
             raise RuntimeError(f"Bitquery GraphQL error: {payload['errors'][:2]}")
         return payload.get("data") or {}
 
-    def fetch_chain(self, chain: str, min_usd: float, hours: int, max_pages: int = 5) -> list[dict[str, Any]]:
+    def fetch_chain(self, chain: str, hours: int, max_pages: int = MAX_PAGES) -> list[dict[str, Any]]:
         if chain not in {"ethereum", "bsc", "solana"}:
             raise ValueError(f"Unsupported chain: {chain}")
-        query = SOLANA_QUERY if chain == "solana" else EVM_QUERY.replace("NETWORK_PLACEHOLDER", "eth" if chain == "ethereum" else "bsc")
+        query = SOLANA_QUERY if chain == "solana" else EVM_QUERY.replace(
+            "NETWORK_PLACEHOLDER", "eth" if chain == "ethereum" else "bsc"
+        )
         root = "Solana" if chain == "solana" else "EVM"
-        rows: list[dict[str, Any]] = []
+        rows_by_key: dict[tuple[str, str, int], dict[str, Any]] = {}
         for page in range(max_pages):
             data = self.query(query, {
-                "minUsd": str(min_usd),
                 "hoursAgo": hours,
                 "limit": PAGE_SIZE,
                 "offset": page * PAGE_SIZE,
@@ -211,11 +209,18 @@ class BitqueryClient:
                 break
             for item in items:
                 row = normalize_solana_transfer(item) if chain == "solana" else normalize_evm_transfer(item, chain)
-                if row and row["amount_usd"] is not None and row["amount_usd"] >= min_usd:
-                    rows.append(row)
+                if row:
+                    key = (row["chain"], row["tx_hash"], row["event_index"])
+                    rows_by_key[key] = row
             if len(items) < PAGE_SIZE:
                 break
-        return rows
+        else:
+            # Never silently present a capped/truncated page scan as complete.
+            raise RuntimeError(
+                f"{chain}: reached MAX_PAGES={max_pages} with full pages; "
+                "collection is incomplete. Increase the page budget or use smaller time windows."
+            )
+        return list(rows_by_key.values())
 
 
 def upload_transfers(rows: list[dict[str, Any]], session: requests.Session | None = None) -> int:
@@ -228,7 +233,6 @@ def upload_transfers(rows: list[dict[str, Any]], session: requests.Session | Non
         "apikey": key,
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
-        # Ignore replays so observed_at_utc remains the first time we saw it.
         "Prefer": "resolution=ignore-duplicates,return=minimal",
     }
     endpoint = f"{url}/rest/v1/onchain_transfers"
@@ -247,7 +251,7 @@ def upload_transfers(rows: list[dict[str, Any]], session: requests.Session | Non
     return len(rows)
 
 
-def collect(min_usd: float = DEFAULT_MIN_USD, hours: int = LOOKBACK_HOURS) -> dict[str, int]:
+def collect(hours: int = LOOKBACK_HOURS, max_pages: int = MAX_PAGES) -> dict[str, int]:
     token = os.environ.get("BITQUERY_ACCESS_TOKEN")
     if not token:
         raise RuntimeError("Missing BITQUERY_ACCESS_TOKEN GitHub secret")
@@ -255,27 +259,32 @@ def collect(min_usd: float = DEFAULT_MIN_USD, hours: int = LOOKBACK_HOURS) -> di
     all_rows: list[dict[str, Any]] = []
     counts: dict[str, int] = {}
     for chain in ("ethereum", "bsc", "solana"):
-        chain_rows = client.fetch_chain(chain, min_usd=min_usd, hours=hours)
+        chain_rows = client.fetch_chain(chain, hours=hours, max_pages=max_pages)
         counts[chain] = len(chain_rows)
         all_rows.extend(chain_rows)
-    # observed_at is set immediately before upload, never backdated to block time.
     observed = datetime.now(timezone.utc).isoformat()
     for row in all_rows:
         row["observed_at_utc"] = observed
     counts["uploaded_attempted"] = upload_transfers(all_rows)
     counts["total"] = len(all_rows)
-    print(json.dumps({"provider": PROVIDER, "lookback_hours": hours, "min_transfer_usd": min_usd, **counts}, sort_keys=True))
+    print(json.dumps({
+        "provider": PROVIDER,
+        "lookback_hours": hours,
+        "usd_filter": "none",
+        "max_pages_per_chain": max_pages,
+        **counts,
+    }, sort_keys=True))
     return counts
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Collect large on-chain transfers from Bitquery")
-    parser.add_argument("--min-usd", type=float, default=float(os.getenv("WHALE_MIN_TRANSFER_USD", DEFAULT_MIN_USD)))
-    parser.add_argument("--hours", type=int, default=LOOKBACK_HOURS)
+    parser = argparse.ArgumentParser(description="Collect all provider-visible on-chain token transfers")
+    parser.add_argument("--hours", type=int, default=int(os.getenv("ONCHAIN_LOOKBACK_HOURS", LOOKBACK_HOURS)))
+    parser.add_argument("--max-pages", type=int, default=int(os.getenv("ONCHAIN_MAX_PAGES", MAX_PAGES)))
     args = parser.parse_args()
-    if args.min_usd <= 0 or args.hours < 1 or args.hours > 24:
-        parser.error("--min-usd must be positive and --hours must be between 1 and 24")
-    collect(args.min_usd, args.hours)
+    if args.hours < 1 or args.hours > 24 or args.max_pages < 1:
+        parser.error("--hours must be 1-24 and --max-pages must be positive")
+    collect(hours=args.hours, max_pages=args.max_pages)
 
 
 if __name__ == "__main__":
