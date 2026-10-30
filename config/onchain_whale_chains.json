@@ -1,43 +1,23 @@
 {
-  "version": "onchain-whale-v1",
+  "version": "onchain-all-token-v2",
   "chains": [
-    {
-      "chain": "ethereum",
-      "family": "evm",
-      "chain_id": 1,
-      "enabled": true
-    },
-    {
-      "chain": "bsc",
-      "family": "evm",
-      "chain_id": 56,
-      "enabled": true
-    },
-    {
-      "chain": "solana",
-      "family": "solana",
-      "cluster": "mainnet-beta",
-      "enabled": true
-    }
+    {"chain": "ethereum", "family": "evm", "chain_id": 1, "enabled": true},
+    {"chain": "bsc", "family": "evm", "chain_id": 56, "enabled": true},
+    {"chain": "solana", "family": "solana", "cluster": "mainnet-beta", "enabled": true}
   ],
-  "thresholds": {
-    "default_min_transfer_usd": 100000,
-    "stablecoin_symbols": [
-      "USDT",
-      "USDC",
-      "DAI",
-      "FDUSD",
-      "USDE"
-    ],
-    "min_label_confidence": 0.8
-  },
   "collection": {
     "mode": "research_only",
+    "usd_filter": "none",
+    "collect_all_provider_visible_fungible_transfers": true,
     "store_raw_payload": true,
     "require_observed_at": true,
     "do_not_infer_trade_direction_from_transfer": true,
-    "lookback_hours": 3,
-    "schedule_minutes": 30
+    "lookback_hours": 1,
+    "max_pages_per_chain": 100,
+    "page_size": 1000,
+    "schedule_minutes": 30,
+    "deduplicate_by": ["chain", "tx_hash", "event_index"],
+    "fail_on_page_cap": true
   },
   "providers": {
     "evm_global_transfers": "bitquery_v2",
