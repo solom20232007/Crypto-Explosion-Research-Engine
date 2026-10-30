@@ -1,12 +1,15 @@
+from datetime import datetime, timedelta, timezone
 import pandas as pd
 import pytest
 from src import news_candle_collector as collector
 
 
 def _candle_frame():
+    closed_day = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=2)
+    open_time = int(closed_day.timestamp() * 1000)
     return pd.DataFrame([{
-        "open_time": 1761004800000, "open": 1.0, "high": 1.2, "low": 0.9,
-        "close": 1.1, "volume": 100.0, "close_time": 1761091199999,
+        "open_time": open_time, "open": 1.0, "high": 1.2, "low": 0.9,
+        "close": 1.1, "volume": 100.0, "close_time": open_time + 86_399_999,
         "quote_volume": 110.0, "trade_count": 10,
         "taker_buy_base_volume": 55.0, "taker_buy_quote_volume": 60.5,
         "ignore": 0,
