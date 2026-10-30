@@ -363,7 +363,9 @@ def run(feed_urls,candle_path,aliases_path=None,output_dir=OUT,extra_articles=No
  summary={"feeds_requested":len(feed_urls),"articles_collected":len(news),"symbol_feature_rows":len(features),"feed_errors":errors,
   "unique_stories_after_deduplication":len(news),
   "duplicate_source_copies_collapsed":int(news.get("duplicate_source_count",pd.Series(dtype=int)).sum()-len(news)) if not news.empty else 0,
-  "availability_rule":"first_seen_utc; article excluded before first_seen_utc",
+  "availability_rule":"available_at_utc (fallback: first_seen_utc); article excluded when availability is equal to or later than signal time",
+  "signal_time_features_enabled":bool(signals_path),
+  "signal_time_feature_rows":len(signal_features) if signals_path else 0,
   "limitations":["RSS coverage is source-dependent","ticker matching can miss aliases or create false matches",
    "keyword sentiment is a triage hint, not a verified model","historical first-seen times cannot be reconstructed from a current feed snapshot"]}
  (output_dir/"news_monitor_summary.json").write_text(json.dumps(summary,indent=2),encoding="utf-8")
