@@ -389,19 +389,45 @@ def upload_news_to_supabase(news, supabase_url=None, secret_key=None):
    "first_seen_utc":item.get("first_seen_utc"),
    "available_at_utc":item.get("available_at_utc") or item.get("first_seen_utc"),
    "matched_symbols":matched})
- id_by_fingerprint={}
+ # Preserve the original first-seen time on repeated collection runs.
+ existing_by_fingerprint={}
  for start in range(0,len(prepared),250):
   batch=prepared[start:start+250]
-  saved=_supabase_request(url,key,"POST","news_events",
-   params={"on_conflict":"fingerprint"},rows=batch,
-   prefer="resolution=merge-duplicates,return=representation")
-  for row in saved:
-   id_by_fingerprint[row["fingerprint"]]=row["id"]
- # Compute each feature row against the actual persisted explosion-event timestamp.
- news_by_id=[]
+  fingerprints=",".join(x["fingerprint"] for x in batch)
+  existing=_supabase_request(url,key,"GET","news_events",
+   params={"select":"id,fingerprint,first_seen_utc,available_at_utc,matched_symbols",
+           "fingerprint":f"in.({fingerprints})"})
+  for row in existing: existing_by_fingerprint[row["fingerprint"]]=row
  for row in prepared:
-  news_id=id_by_fingerprint.get(row["fingerprint"])
-  if news_id: news_by_id.append((row,news_id))
+  previous=existing_by_fingerprint.get(row["fingerprint"])
+  if previous:
+   row["first_seen_utc"]=previous["first_seen_utc"]
+   row["available_at_utc"]=previous["available_at_utc"]
+   row["matched_symbols"]=sorted(set(row["matched_symbols"])|set(previous.get("matched_symbols") or []))
+ for start in range(0,len(prepared),250):
+  batch=prepared[start:start+250]
+  _supabase_request(url,key,"POST","news_events",
+   params={"on_conflict":"fingerprint"},rows=batch,
+   prefer="resolution=merge-duplicates,return=minimal")
+ # Re-read the full persisted event history: features must include earlier archived stories.
+ persisted_news=[]; offset=0
+ while True:
+  page=_supabase_request(url,key,"GET","news_events",
+   params={"select":"id,fingerprint,title,summary,source_domain,category,sentiment_hint,first_seen_utc,available_at_utc,matched_symbols"},
+   offset=offset,limit=1000)
+  persisted_news.extend(page)
+  if len(page)<1000: break
+  offset+=1000
+ # Recompute symbol matches so newly added event symbols can match previously archived stories.
+ for row in persisted_news:
+  text_value=(str(row.get("title") or "")+" "+str(row.get("summary") or "")).strip()
+  row["matched_symbols"]=match_symbols(text_value,symbols,aliases)
+ for start in range(0,len(persisted_news),250):
+  batch=[{"id":r["id"],"matched_symbols":r["matched_symbols"]} for r in persisted_news[start:start+250]]
+  _supabase_request(url,key,"PATCH","news_events",params={},rows=batch,
+   prefer="return=minimal")
+ # Compute each feature row against the actual persisted explosion-event timestamp.
+ news_by_id=[(row,row["id"]) for row in persisted_news]
  feature_rows=[]
  for event in events:
   event_time=pd.to_datetime(event["event_time"],utc=True,errors="coerce")
@@ -428,7 +454,7 @@ def upload_news_to_supabase(news, supabase_url=None, secret_key=None):
   _supabase_request(url,key,"POST","news_symbol_features",
    params={"on_conflict":"explosion_event_id"},rows=feature_rows[start:start+250],
    prefer="resolution=merge-duplicates,return=minimal")
- summary={"news_events_upserted":len(prepared),"explosion_events_read":len(events),
+ summary={"news_events_upserted":len(prepared),"persisted_news_events_read":len(persisted_news),"explosion_events_read":len(events),
   "news_symbol_features_upserted":len(feature_rows),
   "events_with_any_news":sum(r["news_count_7d"]>0 for r in feature_rows),
   "availability_rule":"available_at_utc < explosion_events.event_time; published_utc is never treated as availability"}
