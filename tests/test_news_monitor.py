@@ -119,7 +119,7 @@ def test_supabase_news_features_link_to_real_explosion_events_and_exclude_late_n
 
 
 def test_stale_published_articles_are_excluded_even_when_recently_discovered():
- candles=pd.DataFrame([{"symbol":"ETHUSDT","open_time":1761782400000}])
+ candles=pd.DataFrame([{"symbol":"ETHUSDT","open_time":1793404800000}])
  news=pd.DataFrame([
   {"text":"Ethereum Foundation update","first_seen_utc":"2026-10-30T20:00:00Z",
    "available_at_utc":"2026-10-30T20:00:00Z","published_utc":"2020-11-26T00:00:00Z",
