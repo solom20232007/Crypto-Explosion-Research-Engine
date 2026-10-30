@@ -126,3 +126,11 @@ def test_fetch_chain_raises_when_one_second_interval_is_still_capped():
 
 def test_missing_transfer_endpoints_are_skipped():
     assert normalize_evm_transfer({"Transfer": {}, "Transaction": {}, "Block": {}}, "bsc") is None
+
+
+def test_interval_queries_use_supported_bitquery_datetime_scalar():
+    assert "$since: DateTime!" in EVM_QUERY
+    assert "$till: DateTime!" in EVM_QUERY
+    assert "$since: DateTime!" in SOLANA_QUERY
+    assert "$till: DateTime!" in SOLANA_QUERY
+    assert "ISO8601DateTime" not in EVM_QUERY + SOLANA_QUERY
