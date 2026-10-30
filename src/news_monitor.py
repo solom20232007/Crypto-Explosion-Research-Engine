@@ -1,6 +1,6 @@
 """Timestamp-safe RSS/Atom news ingestion for pre-breakout research."""
 from __future__ import annotations
-import argparse, json, os, re
+import argparse, hashlib, json, os, re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -337,7 +337,105 @@ def build_signal_time_features(news, signals, aliases=None):
    "negative_news_hint_count_7d":(r7.sentiment_hint<0).sum()})
  return pd.DataFrame(results)
 
-def run(feed_urls,candle_path,aliases_path=None,output_dir=OUT,extra_articles=None,extra_errors=None,signals_path=None):
+def _supabase_request(url, key, method, table, *, params=None, rows=None, prefer=None, offset=None, limit=1000):
+ headers={"apikey":key,"Authorization":f"Bearer {key}","Content-Type":"application/json"}
+ if prefer: headers["Prefer"]=prefer
+ if offset is not None: headers["Range"]=f"{offset}-{offset+limit-1}"
+ response=requests.request(method,f"{url.rstrip('/')}/rest/v1/{table}",headers=headers,
+  params=params,json=rows,timeout=60)
+ if not response.ok:
+  raise RuntimeError(f"Supabase {table} {method} failed: HTTP {response.status_code}: {response.text[:1000]}")
+ return response.json() if response.text.strip() else []
+
+def _load_supabase_events(url,key):
+ events=[]; offset=0
+ while True:
+  page=_supabase_request(url,key,"GET","explosion_events",
+   params={"select":"id,symbol,timeframe,event_time","order":"event_time.asc"},
+   offset=offset,limit=1000)
+  events.extend(page)
+  if len(page)<1000: break
+  offset+=1000
+ return events
+
+def upload_news_to_supabase(news, supabase_url=None, secret_key=None):
+ """Persist timestamped news and point-in-time features linked to existing explosion_events."""
+ url=(supabase_url or os.getenv("SUPABASE_URL","")).strip()
+ key=(secret_key or os.getenv("SUPABASE_SECRET_KEY","")).strip()
+ if not url or not key:
+  raise RuntimeError("SUPABASE_URL and SUPABASE_SECRET_KEY are required for Supabase news upload")
+ events=_load_supabase_events(url,key)
+ symbols=sorted({str(e["symbol"]) for e in events if e.get("symbol")})
+ aliases_path=os.getenv("NEWS_ALIASES_PATH","").strip()
+ aliases=json.loads(Path(aliases_path).read_text(encoding="utf-8")) if aliases_path else {}
+ prepared=[]
+ for _,item in news.iterrows():
+  text_value=str(item.get("text") or (str(item.get("title",""))+" "+str(item.get("summary","")))).strip()
+  matched=match_symbols(text_value,symbols,aliases)
+  raw_url=str(item.get("url") or "").strip()
+  identity=raw_url.lower().rstrip("/") or "|".join([
+   str(item.get("source_domain","")).lower(),str(item.get("title","")).lower(),
+   str(item.get("published_utc","") or item.get("first_seen_utc",""))])
+  fingerprint=hashlib.sha256(identity.encode("utf-8")).hexdigest()
+  prepared.append({"fingerprint":fingerprint,"title":str(item.get("title","")),
+   "summary":str(item.get("summary","") or ""),"url":raw_url,
+   "source_name":str(item.get("source_name","") or ""),
+   "source_domain":str(item.get("source_domain","") or ""),
+   "source_tier":str(item.get("source_tier","unrated") or "unrated"),
+   "source_type":str(item.get("source_type","media") or "media"),
+   "category":str(item.get("category","general") or "general"),
+   "sentiment_hint":int(item.get("sentiment_hint",0) or 0),
+   "published_utc":item.get("published_utc") or None,
+   "first_seen_utc":item.get("first_seen_utc"),
+   "available_at_utc":item.get("available_at_utc") or item.get("first_seen_utc"),
+   "matched_symbols":matched})
+ id_by_fingerprint={}
+ for start in range(0,len(prepared),250):
+  batch=prepared[start:start+250]
+  saved=_supabase_request(url,key,"POST","news_events",
+   params={"on_conflict":"fingerprint"},rows=batch,
+   prefer="resolution=merge-duplicates,return=representation")
+  for row in saved:
+   id_by_fingerprint[row["fingerprint"]]=row["id"]
+ # Compute each feature row against the actual persisted explosion-event timestamp.
+ news_by_id=[]
+ for row in prepared:
+  news_id=id_by_fingerprint.get(row["fingerprint"])
+  if news_id: news_by_id.append((row,news_id))
+ feature_rows=[]
+ for event in events:
+  event_time=pd.to_datetime(event["event_time"],utc=True,errors="coerce")
+  if pd.isna(event_time): continue
+  eligible=[]
+  for row,news_id in news_by_id:
+   if event["symbol"] not in row["matched_symbols"]: continue
+   available=pd.to_datetime(row["available_at_utc"],utc=True,errors="coerce")
+   if pd.isna(available) or available>=event_time: continue
+   age=event_time-available
+   if age<=pd.Timedelta(days=7): eligible.append((row,news_id,available))
+  last24=[x for x in eligible if event_time-x[2]<=pd.Timedelta(hours=24)]
+  cats=[x[0]["category"] for x in eligible]
+  feature_rows.append({"explosion_event_id":event["id"],"symbol":event["symbol"],
+   "timeframe":event.get("timeframe") or "1h","signal_time_utc":event_time.isoformat(),
+   "news_count_24h":len(last24),"news_count_7d":len(eligible),
+   "exchange_announcement_count_7d":sum("exchange_announcement" in c for c in cats),
+   "token_unlock_count_7d":sum("token_unlock" in c for c in cats),
+   "security_news_count_7d":sum("security" in c for c in cats),
+   "positive_news_hint_count_7d":sum(x[0]["sentiment_hint"]>0 for x in eligible),
+   "negative_news_hint_count_7d":sum(x[0]["sentiment_hint"]<0 for x in eligible),
+   "matched_news_event_ids":[x[1] for x in eligible]})
+ for start in range(0,len(feature_rows),250):
+  _supabase_request(url,key,"POST","news_symbol_features",
+   params={"on_conflict":"explosion_event_id"},rows=feature_rows[start:start+250],
+   prefer="resolution=merge-duplicates,return=minimal")
+ summary={"news_events_upserted":len(prepared),"explosion_events_read":len(events),
+  "news_symbol_features_upserted":len(feature_rows),
+  "events_with_any_news":sum(r["news_count_7d"]>0 for r in feature_rows),
+  "availability_rule":"available_at_utc < explosion_events.event_time; published_utc is never treated as availability"}
+ print(json.dumps({"supabase_news_upload":summary},indent=2))
+ return summary
+
+def run(feed_urls,candle_path,aliases_path=None,output_dir=OUT,extra_articles=None,extra_errors=None,upload_supabase=False):
  candles=pd.read_csv(candle_path); aliases=json.loads(Path(aliases_path).read_text()) if aliases_path else {}
  raw,errors=collect_feeds(feed_urls)
  raw.extend(extra_articles or [])
@@ -352,20 +450,12 @@ def run(feed_urls,candle_path,aliases_path=None,output_dir=OUT,extra_articles=No
  output_dir.mkdir(parents=True,exist_ok=True)
  news.to_csv(output_dir/"news_events.csv",index=False)
  features.to_csv(output_dir/"news_symbol_daily_features.csv",index=False)
- if signals_path:
-  signal_file=Path(signals_path)
-  if signal_file.exists():
-   signals=pd.read_csv(signal_file)
-   signal_features=build_signal_time_features(news,signals,aliases)
-   signal_features.to_csv(output_dir/"news_symbol_signal_features.csv",index=False)
-  else:
-   raise FileNotFoundError(f"Signal-time input file not found: {signal_file}")
+ supabase_summary=upload_news_to_supabase(news) if upload_supabase else None
  summary={"feeds_requested":len(feed_urls),"articles_collected":len(news),"symbol_feature_rows":len(features),"feed_errors":errors,
   "unique_stories_after_deduplication":len(news),
   "duplicate_source_copies_collapsed":int(news.get("duplicate_source_count",pd.Series(dtype=int)).sum()-len(news)) if not news.empty else 0,
   "availability_rule":"available_at_utc (fallback: first_seen_utc); article excluded when availability is equal to or later than signal time",
-  "signal_time_features_enabled":bool(signals_path),
-  "signal_time_feature_rows":len(signal_features) if signals_path else 0,
+  "supabase_upload":supabase_summary,
   "limitations":["RSS coverage is source-dependent","ticker matching can miss aliases or create false matches",
    "keyword sentiment is a triage hint, not a verified model","historical first-seen times cannot be reconstructed from a current feed snapshot"]}
  (output_dir/"news_monitor_summary.json").write_text(json.dumps(summary,indent=2),encoding="utf-8")
@@ -375,7 +465,7 @@ def main():
  p=argparse.ArgumentParser(); p.add_argument("--candles",default="reports/surge_scan/daily_candles.csv")
  p.add_argument("--aliases",default=""); p.add_argument("--output-dir",default=str(OUT))
  p.add_argument("--feeds",default=os.getenv("NEWS_FEED_URLS","")); p.add_argument("--feed-config",default=""); p.add_argument("--binance-public-limit",type=int,default=50); p.add_argument("--binance-ws-seconds",type=int,default=0)
- p.add_argument("--candle-days",type=int,default=30); p.add_argument("--signals",default=""); a=p.parse_args()
+ p.add_argument("--candle-days",type=int,default=30); p.add_argument("--upload-supabase",action="store_true"); a=p.parse_args()
  feeds=[x.strip() for x in a.feeds.split(",") if x.strip()]
  if a.feed_config:
   configured=load_feed_config(a.feed_config)
@@ -400,5 +490,5 @@ def main():
   candles=pd.read_csv(candle_path)
  if candles.empty or not {"symbol","open_time"}.issubset(candles.columns):
   raise RuntimeError(f"Daily candle input is empty or invalid: {candle_path}")
- print(json.dumps(run(feeds,candle_path,a.aliases or None,Path(a.output_dir),extra_articles,public_errors,a.signals or None),indent=2))
+ print(json.dumps(run(feeds,candle_path,a.aliases or None,Path(a.output_dir),extra_articles,public_errors,a.upload_supabase),indent=2))
 if __name__=="__main__": main()
