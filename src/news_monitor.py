@@ -314,7 +314,8 @@ def run(feed_urls,candle_path,aliases_path=None,output_dir=OUT,extra_articles=No
 def main():
  p=argparse.ArgumentParser(); p.add_argument("--candles",default="reports/surge_scan/daily_candles.csv")
  p.add_argument("--aliases",default=""); p.add_argument("--output-dir",default=str(OUT))
- p.add_argument("--feeds",default=os.getenv("NEWS_FEED_URLS","")); p.add_argument("--feed-config",default=""); p.add_argument("--binance-public-limit",type=int,default=50); p.add_argument("--binance-ws-seconds",type=int,default=0); a=p.parse_args()
+ p.add_argument("--feeds",default=os.getenv("NEWS_FEED_URLS","")); p.add_argument("--feed-config",default=""); p.add_argument("--binance-public-limit",type=int,default=50); p.add_argument("--binance-ws-seconds",type=int,default=0)
+ p.add_argument("--candle-days",type=int,default=30); a=p.parse_args()
  feeds=[x.strip() for x in a.feeds.split(",") if x.strip()]
  if a.feed_config:
   configured=load_feed_config(a.feed_config)
@@ -330,5 +331,13 @@ def main():
    try: extra_articles.extend(collect_binance_announcements(key,secret,a.binance_ws_seconds))
    except Exception as exc: public_errors.append({"feed":"Binance announcements WebSocket","source_name":"Binance Announcements WebSocket","error":str(exc)})
   else: public_errors.append({"feed":"Binance announcements WebSocket","source_name":"Binance Announcements WebSocket","error":"Skipped: API credentials are not configured"})
- print(json.dumps(run(feeds,a.candles,a.aliases or None,Path(a.output_dir),extra_articles,public_errors),indent=2))
+ candle_path=Path(a.candles)
+ if not candle_path.exists() or candle_path.stat().st_size == 0:
+  from src.news_candle_collector import collect_recent_daily_candles
+  print("Daily candles missing/empty; collecting recent Binance Spot daily candles...")
+  collect_recent_daily_candles(candle_path,days=a.candle_days)
+ candles=pd.read_csv(candle_path)
+ if candles.empty or not {"symbol","open_time"}.issubset(candles.columns):
+  raise RuntimeError(f"Daily candle input is empty or invalid: {candle_path}")
+ print(json.dumps(run(feeds,candle_path,a.aliases or None,Path(a.output_dir),extra_articles,public_errors),indent=2))
 if __name__=="__main__": main()
