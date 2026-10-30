@@ -332,11 +332,12 @@ def main():
    except Exception as exc: public_errors.append({"feed":"Binance announcements WebSocket","source_name":"Binance Announcements WebSocket","error":str(exc)})
   else: public_errors.append({"feed":"Binance announcements WebSocket","source_name":"Binance Announcements WebSocket","error":"Skipped: API credentials are not configured"})
  candle_path=Path(a.candles)
- if not candle_path.exists() or candle_path.stat().st_size == 0:
+ candles=pd.read_csv(candle_path) if candle_path.exists() else pd.DataFrame()
+ if candles.empty:
   from src.news_candle_collector import collect_recent_daily_candles
   print("Daily candles missing/empty; collecting recent Binance Spot daily candles...")
   collect_recent_daily_candles(candle_path,days=a.candle_days)
- candles=pd.read_csv(candle_path)
+  candles=pd.read_csv(candle_path)
  if candles.empty or not {"symbol","open_time"}.issubset(candles.columns):
   raise RuntimeError(f"Daily candle input is empty or invalid: {candle_path}")
  print(json.dumps(run(feeds,candle_path,a.aliases or None,Path(a.output_dir),extra_articles,public_errors),indent=2))
