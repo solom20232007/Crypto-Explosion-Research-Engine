@@ -44,7 +44,7 @@ jobs:
             echo "Daily candles not present in the research branch checkout."
             echo "Creating an empty candle input so news_events.csv can still be collected."
             mkdir -p "$(dirname "$CANDLES_PATH")"
-            printf 'symbol,open_time\\n' > "$CANDLES_PATH"
+            printf 'symbol,open_time\n' > "$CANDLES_PATH"
           fi
       - name: Collect timestamp-safe news and public Binance announcements
         env:
