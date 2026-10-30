@@ -326,6 +326,8 @@ def upload_news_to_supabase(news, supabase_url=None, secret_key=None):
  events=_load_supabase_events(url,key)
  symbols=sorted({str(e["symbol"]) for e in events if e.get("symbol")})
  aliases_path=os.getenv("NEWS_ALIASES_PATH","").strip()
+ if not aliases_path and Path("config/news_symbol_aliases.json").exists():
+  aliases_path="config/news_symbol_aliases.json"
  aliases=json.loads(Path(aliases_path).read_text(encoding="utf-8")) if aliases_path else {}
  prepared=[]
  for _,item in news.iterrows():
@@ -457,6 +459,8 @@ def main():
  p.add_argument("--aliases",default=""); p.add_argument("--output-dir",default=str(OUT))
  p.add_argument("--feeds",default=os.getenv("NEWS_FEED_URLS","")); p.add_argument("--feed-config",default=""); p.add_argument("--binance-public-limit",type=int,default=50); p.add_argument("--binance-ws-seconds",type=int,default=0)
  p.add_argument("--candle-days",type=int,default=30); p.add_argument("--upload-supabase",action="store_true"); a=p.parse_args()
+ if not a.aliases and Path("config/news_symbol_aliases.json").exists():
+  a.aliases="config/news_symbol_aliases.json"
  feeds=[x.strip() for x in a.feeds.split(",") if x.strip()]
  if a.feed_config:
   configured=load_feed_config(a.feed_config)
