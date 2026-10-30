@@ -23,14 +23,16 @@ Base and Arbitrum can be added after validating provider coverage and mapping to
 6. Deduplicate replays using the primary key and upsert. Keep provider and raw payload for audit.
 7. Do not train on live snapshots as if they were historical unless they were archived at the time.
 
-## Provider setup
-- EVM: Etherscan API V2 supports a shared API endpoint and chain IDs, but account/transfer endpoints are address-scoped; it does not by itself discover all large transfers globally. See https://docs.etherscan.io/
-- Solana: Helius provides address transaction history and transfer-oriented APIs. It is useful after candidate wallets or mints are known; it is not a universal global whale feed. See https://www.helius.dev/docs/getting-data
-- A provider with global large-transfer discovery or an explicit monitored-wallet/token universe is required before scheduled ingestion can be enabled.
+## Provider setup and current collector
+- Bitquery V2 GraphQL is the first provider for Ethereum, BNB Chain and Solana. Its transfer datasets expose token movements and provider-valued USD amounts where available. Docs: https://docs.bitquery.io/docs/blockchain/Ethereum/transfers/erc20-token-transfer-api/ and https://docs.bitquery.io/docs/blockchain/Solana/solana-transfers/
+- GitHub secret required: `BITQUERY_ACCESS_TOKEN`. Never commit or print this value.
+- Collector: `src/onchain_whale_collector.py`; workflow: `.github/workflows/onchain-whale-collector.yml`.
+- Initial scope: transfers with provider `AmountInUSD` above USD 100,000, 3-hour overlapping lookback, every 30 minutes. The overlap plus primary-key upsert makes replays safe.
+- The collector writes immutable transfer rows only. Wallet labels and directional buy/sell interpretation are intentionally not inferred. Feature aggregation and verified wallet-label enrichment are separate follow-up phases.
 
-## First operational milestones
-1. Apply the Supabase migration.
-2. Configure provider credentials as GitHub Actions secrets (never commit keys).
-3. Implement provider-specific backfill/live adapters and token-address registry.
-4. Validate coverage, replay idempotency, observed-time integrity, and label provenance.
-5. Only then schedule collection and build features for the historical event study.
+## Operational validation
+1. Run the workflow manually after configuring the secret.
+2. Confirm successful API responses and non-zero/zero counts per chain without assuming zero means no whales (it may mean no provider-valued transfers above threshold).
+3. Verify Supabase inserts and duplicate replay behavior; `observed_at_utc` is preserved on duplicate replays.
+4. Review provider plan limits and coverage before extending historical backfill or increasing frequency.
+5. Build point-in-time flow features only after the raw feed is validated.
