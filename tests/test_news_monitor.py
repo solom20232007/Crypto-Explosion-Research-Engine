@@ -116,3 +116,21 @@ def test_supabase_news_features_link_to_real_explosion_events_and_exclude_late_n
  assert feature["exchange_announcement_count_7d"]==1
  assert feature["security_news_count_7d"]==0
  assert len(feature["matched_news_event_ids"])==1
+
+
+def test_stale_published_articles_are_excluded_even_when_recently_discovered():
+ candles=pd.DataFrame([{"symbol":"ETHUSDT","open_time":1761782400000}])
+ news=pd.DataFrame([
+  {"text":"Ethereum Foundation update","first_seen_utc":"2026-10-30T20:00:00Z",
+   "available_at_utc":"2026-10-30T20:00:00Z","published_utc":"2020-11-26T00:00:00Z",
+   "category":"general","sentiment_hint":0},
+  {"text":"Ethereum network upgrade","first_seen_utc":"2026-10-30T20:00:00Z",
+   "available_at_utc":"2026-10-30T20:00:00Z","published_utc":"2026-10-30T19:00:00Z",
+   "category":"partnership","sentiment_hint":1}
+ ])
+ result=build_symbol_features(news,candles,{"ETH":["Ethereum"]})
+ assert result.iloc[0]["news_count_7d"]==1
+
+def test_major_coin_aliases_match_project_names():
+ aliases={"BTC":["Bitcoin"],"ETH":["Ethereum"],"SOL":["Solana"]}
+ assert match_symbols("Bitcoin and Solana market update",["BTCUSDT","ETHUSDT","SOLUSDT"],aliases)==["BTCUSDT","SOLUSDT"]
