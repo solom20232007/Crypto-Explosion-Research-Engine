@@ -22,7 +22,7 @@ PAGE_SIZE = 1000
 MAX_PAGES = 100
 
 EVM_QUERY = """
-query AllTokenTransfers($since: ISO8601DateTime!, $till: ISO8601DateTime!, $limit: Int!, $offset: Int!) {
+query AllTokenTransfers($since: DateTime!, $till: DateTime!, $limit: Int!, $offset: Int!) {
   EVM(dataset: realtime, network: NETWORK_PLACEHOLDER) {
     Transfers(
       where: {
@@ -44,7 +44,7 @@ query AllTokenTransfers($since: ISO8601DateTime!, $till: ISO8601DateTime!, $limi
 """
 
 SOLANA_QUERY = """
-query AllTokenTransfers($since: ISO8601DateTime!, $till: ISO8601DateTime!, $limit: Int!, $offset: Int!) {
+query AllTokenTransfers($since: DateTime!, $till: DateTime!, $limit: Int!, $offset: Int!) {
   Solana(dataset: realtime) {
     Transfers(
       where: {
