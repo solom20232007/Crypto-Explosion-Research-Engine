@@ -1,6 +1,13 @@
 name: On-chain Whale Transfer Collector
 
 on:
+  push:
+    branches:
+      - research/binance-prebreakout-advisor-v1
+    paths:
+      - '.github/workflows/onchain-whale-collector.yml'
+      - 'src/onchain_whale_collector.py'
+      - 'tests/test_onchain_whale_collector.py'
   workflow_dispatch:
     inputs:
       min_usd:
