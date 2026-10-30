@@ -134,3 +134,38 @@ def test_interval_queries_use_supported_bitquery_datetime_scalar():
     assert "$since: DateTime!" in SOLANA_QUERY
     assert "$till: DateTime!" in SOLANA_QUERY
     assert "ISO8601DateTime" not in EVM_QUERY + SOLANA_QUERY
+
+
+
+def test_query_retries_remote_disconnect_then_succeeds(monkeypatch):
+    import requests
+    import src.onchain_whale_collector as collector
+
+    class Response:
+        status_code = 200
+        ok = True
+        headers = {}
+
+        @property
+        def text(self):
+            return ""
+
+        def json(self):
+            return {"data": {"EVM": {"Transfers": []}}}
+
+    class FlakySession:
+        def __init__(self):
+            self.calls = 0
+
+        def post(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls < 3:
+                raise requests.exceptions.ConnectionError("RemoteDisconnected")
+            return Response()
+
+    monkeypatch.setattr(collector.time, "sleep", lambda _seconds: None)
+    session = FlakySession()
+    client = BitqueryClient("test-token", session=session)
+    result = client.query(EVM_QUERY.replace("NETWORK_PLACEHOLDER", "eth"), {})
+    assert session.calls == 3
+    assert result == {"EVM": {"Transfers": []}}
