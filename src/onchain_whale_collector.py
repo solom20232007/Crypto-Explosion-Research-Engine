@@ -22,7 +22,7 @@ PAGE_SIZE = 1000
 
 EVM_QUERY = """
 query WhaleTransfers($minUsd: String!, $hoursAgo: Int!, $limit: Int!, $offset: Int!) {
-  EVM(dataset: combined, network: NETWORK_PLACEHOLDER) {
+  EVM(dataset: realtime, network: NETWORK_PLACEHOLDER) {
     Transfers(
       where: {
         Block: {Time: {since_relative: {hours_ago: $hoursAgo}}}
@@ -44,7 +44,7 @@ query WhaleTransfers($minUsd: String!, $hoursAgo: Int!, $limit: Int!, $offset: I
 
 SOLANA_QUERY = """
 query WhaleTransfers($minUsd: String!, $hoursAgo: Int!, $limit: Int!, $offset: Int!) {
-  Solana(dataset: combined) {
+  Solana(dataset: realtime) {
     Transfers(
       where: {
         Block: {Time: {since_relative: {hours_ago: $hoursAgo}}}
