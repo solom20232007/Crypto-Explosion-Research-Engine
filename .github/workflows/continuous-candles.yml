@@ -1,6 +1,9 @@
 name: Continuous Binance Hourly Candle Collection
 
 on:
+  push:
+    paths:
+      - ".github/workflows/continuous-candles.yml"
   schedule:
     - cron: "7 * * * *"
   workflow_dispatch:
