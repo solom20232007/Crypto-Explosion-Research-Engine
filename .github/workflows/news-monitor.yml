@@ -38,8 +38,18 @@ jobs:
           pip install pytest
       - name: Run tests
         run: python -m pytest -q
-      - name: Collect timestamp-safe news (including public Binance announcements)
-        run: python -m src.news_monitor --feed-config "${{ inputs.feed_config }}" --feeds "${{ inputs.feeds }}" --candles "${{ inputs.candles_path }}" --binance-public-limit 50
+      - name: Collect timestamp-safe news and update point-in-time Supabase features
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: >-
+          python -m src.news_monitor
+          --feed-config "${{ inputs.feed_config }}"
+          --feeds "${{ inputs.feeds }}"
+          --candles "${{ inputs.candles_path }}"
+          --aliases config/news_symbol_aliases.json
+          --binance-public-limit 50
+          --upload-supabase
       - name: Upload news research artifact
         uses: actions/upload-artifact@v4
         with:
