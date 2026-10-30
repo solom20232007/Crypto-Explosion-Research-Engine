@@ -1,15 +1,11 @@
-# Scanner signal-time news features
+# Supabase-backed point-in-time news features
 
-The news monitor can now create `news_symbol_signal_features.csv` from the actual scanner signal timestamps.
+The news monitor writes collected articles into the existing Supabase `public.news_events` table and computes one feature row per existing `public.explosion_events` row in `public.news_symbol_features`.
 
-## Input
+## Required GitHub Actions secrets
 
-Pass a CSV using `--signals`. It must contain:
-
-- `symbol`: Binance symbol such as `ABCUSDT`
-- `signal_time_utc`: timezone-aware UTC timestamp, preferably ISO 8601 such as `2026-10-30T19:42:00Z`
-
-One row represents one symbol at one signal timestamp. Repeated symbols at different timestamps are expected.
+- `SUPABASE_URL`
+- `SUPABASE_SECRET_KEY` (server-side secret/service-role key; never expose it in browser code)
 
 ## Run
 
@@ -17,17 +13,28 @@ One row represents one symbol at one signal timestamp. Repeated symbols at diffe
 python -m src.news_monitor \
   --feed-config config/news_feeds.json \
   --candles reports/surge_scan/daily_candles.csv \
-  --signals reports/surge_scan/scanner_signals.csv
+  --upload-supabase
 ```
 
-The input path above is an example; provide the real CSV emitted by the scanner. Without `--signals`, the monitor continues to produce the existing daily feature file only.
+The daily CSV artifact remains available for diagnostics. Supabase is the durable store and the source of event timestamps.
 
 ## Point-in-time rule
 
-News availability uses `available_at_utc`, falling back to `first_seen_utc` for legacy event files. `published_utc` is never used as a substitute for availability. A story is included only when its availability timestamp is strictly earlier than the signal timestamp; equal timestamps are excluded conservatively.
+For each row in `explosion_events`, a news story is eligible only when:
 
-The generated file contains the same 24-hour / 7-day counts, announcement / unlock / security categories, and positive / negative keyword hints as the daily feature file.
+```text
+news_events.available_at_utc < explosion_events.event_time
+```
 
-## Important limitation
+Equality is excluded. `published_utc` is retained as publisher metadata and is never substituted for availability. Repeated collection preserves the original `first_seen_utc` and `available_at_utc` values.
 
-A current RSS or Binance snapshot cannot reconstruct when old stories first became visible historically. Historical backtests must use archived first-seen timestamps, not today's collection time or the publisher's potentially older publication timestamp.
+The uploader:
+1. Upserts news into `news_events` by stable fingerprint.
+2. Matches article title/summary to symbols in `explosion_events`.
+3. Reads the persisted news archive, including previously collected articles.
+4. Computes 24-hour and 7-day counts and category/sentiment hints per event.
+5. Upserts the result by `explosion_event_id` in `news_symbol_features`, including matched news UUIDs.
+
+## Historical limitation
+
+The current Supabase database has a finite set of historical explosion events. News first seen after an event cannot contribute to that event, even if the publisher's displayed publication date is earlier. To create useful nonzero features for future events, the news collector must run before those events occur and preserve its first-seen timestamps.
