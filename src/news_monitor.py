@@ -422,9 +422,9 @@ def upload_news_to_supabase(news, supabase_url=None, secret_key=None):
  for row in persisted_news:
   text_value=(str(row.get("title") or "")+" "+str(row.get("summary") or "")).strip()
   row["matched_symbols"]=match_symbols(text_value,symbols,aliases)
- for start in range(0,len(persisted_news),250):
-  batch=[{"id":r["id"],"matched_symbols":r["matched_symbols"]} for r in persisted_news[start:start+250]]
-  _supabase_request(url,key,"PATCH","news_events",params={},rows=batch,
+ for row in persisted_news:
+  _supabase_request(url,key,"PATCH","news_events",
+   params={"id":f"eq.{row['id']}"},rows={"matched_symbols":row["matched_symbols"]},
    prefer="return=minimal")
  # Compute each feature row against the actual persisted explosion-event timestamp.
  news_by_id=[(row,row["id"]) for row in persisted_news]
