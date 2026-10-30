@@ -69,45 +69,50 @@ def test_cross_source_duplicate_story_keeps_provenance():
  assert result.iloc[0]["source_name"]=="One|Two"
 
 
-from src.news_monitor import build_signal_time_features
-
-def test_signal_time_features_use_first_seen_and_exclude_late_news():
+def test_supabase_news_features_link_to_real_explosion_events_and_exclude_late_news(monkeypatch):
+ import src.news_monitor as monitor
+ stored=[]
+ calls=[]
+ monkeypatch.setattr(monitor,"_load_supabase_events",lambda url,key:[
+  {"id":77,"symbol":"ABCUSDT","timeframe":"1h","event_time":"2024-10-02T10:00:00Z"}
+ ])
+ def fake_request(url,key,method,table,params=None,rows=None,prefer=None,offset=None,limit=1000):
+  calls.append((method,table,params,rows,prefer))
+  if method=="GET" and table=="news_events":
+   if params and "fingerprint" in params:
+    return []
+   return list(stored)
+  if method=="POST" and table=="news_events":
+   for i,row in enumerate(rows,1):
+    stored.append({"id":i,"matched_symbols":row["matched_symbols"],**row})
+   return []
+  if method=="PATCH" and table=="news_events":
+   for row in stored:
+    if params.get("id")==f"eq.{row['id']}": row.update(rows)
+   return []
+  if method=="POST" and table=="news_symbol_features":
+   calls.append(("FEATURE_ROWS",rows))
+   return []
+  raise AssertionError((method,table,params))
+ monkeypatch.setattr(monitor,"_supabase_request",fake_request)
  news=pd.DataFrame([
-  {"text":"$ABC Binance listing","available_at_utc":"2024-10-02T09:00:00Z","first_seen_utc":"2024-10-02T09:00:00Z","category":"exchange_announcement","sentiment_hint":1},
-  {"text":"$ABC token unlock","available_at_utc":"2024-10-02T10:00:00Z","first_seen_utc":"2024-10-02T10:00:00Z","category":"token_unlock","sentiment_hint":-1},
-  {"text":"$ABC security incident","available_at_utc":"2024-10-02T11:00:00Z","first_seen_utc":"2024-10-02T11:00:00Z","category":"security","sentiment_hint":-1},
+  {"title":"$ABC Binance listing","summary":"","url":"https://example.com/1",
+   "source_domain":"example.com","source_name":"Example","source_tier":"official",
+   "source_type":"exchange","category":"exchange_announcement","sentiment_hint":1,
+   "published_utc":"2024-10-02T08:00:00Z","first_seen_utc":"2024-10-02T09:00:00Z",
+   "available_at_utc":"2024-10-02T09:00:00Z","text":"$ABC Binance listing"},
+  {"title":"$ABC security incident","summary":"","url":"https://example.com/2",
+   "source_domain":"example.com","source_name":"Example","source_tier":"media",
+   "source_type":"media","category":"security","sentiment_hint":-1,
+   "published_utc":"2024-10-02T09:30:00Z","first_seen_utc":"2024-10-02T10:00:00Z",
+   "available_at_utc":"2024-10-02T10:00:00Z","text":"$ABC security incident"}
  ])
- signals=pd.DataFrame([
-  {"symbol":"ABCUSDT","signal_time_utc":"2024-10-02T10:30:00Z"},
-  {"symbol":"ABCUSDT","signal_time_utc":"2024-10-02T11:00:00Z"},
- ])
- result=build_signal_time_features(news,signals).set_index("signal_time_utc")
- first=result.loc["2024-10-02T10:30:00Z"]
- assert first["news_count_24h"]==2
- assert first["exchange_announcement_count_7d"]==1
- assert first["token_unlock_count_7d"]==1
- assert first["security_news_count_7d"]==0
- second=result.loc["2024-10-02T11:00:00Z"]
- # A story first seen at exactly the signal timestamp is excluded conservatively.
- assert second["news_count_24h"]==2
- assert second["security_news_count_7d"]==0
-
-def test_signal_time_features_do_not_use_published_time_as_availability():
- news=pd.DataFrame([{
-  "text":"$ABC partnership",
-  "published_utc":"2024-10-01T08:00:00Z",
-  "first_seen_utc":"2024-10-02T12:00:00Z",
-  "available_at_utc":"2024-10-02T12:00:00Z",
-  "category":"partnership","sentiment_hint":1
- }])
- signals=pd.DataFrame([{"symbol":"ABCUSDT","signal_time_utc":"2024-10-02T11:59:00Z"}])
- result=build_signal_time_features(news,signals)
- assert result.iloc[0]["news_count_7d"]==0
-
-def test_signal_time_features_require_explicit_signal_timestamps():
- signals=pd.DataFrame([{"symbol":"ABCUSDT","timestamp":"2024-10-02T12:00:00Z"}])
- try:
-  build_signal_time_features(pd.DataFrame(),signals)
-  assert False, "missing signal_time_utc should fail"
- except ValueError as exc:
-  assert "signal_time_utc" in str(exc)
+ result=monitor.upload_news_to_supabase(news,"https://project.supabase.co","secret")
+ feature_call=[x for x in calls if x[0]=="FEATURE_ROWS"][0]
+ feature=feature_call[1][0]
+ assert result["news_symbol_features_upserted"]==1
+ assert feature["explosion_event_id"]==77
+ assert feature["news_count_7d"]==1
+ assert feature["exchange_announcement_count_7d"]==1
+ assert feature["security_news_count_7d"]==0
+ assert len(feature["matched_news_event_ids"])==1
