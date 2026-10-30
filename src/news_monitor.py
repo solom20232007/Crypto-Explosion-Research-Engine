@@ -132,7 +132,8 @@ def build_symbol_features(news,candles,aliases=None):
  if missing: raise ValueError(f"candles missing columns: {sorted(missing)}")
  n=news.copy()
  if n.empty: n=pd.DataFrame(columns=["text","first_seen_utc","category","sentiment_hint"])
- n["first_seen"]=pd.to_datetime(n.get("first_seen_utc",pd.Series(dtype=str)),utc=True,errors="coerce")
+ n["available_at"]=pd.to_datetime(n.get("available_at_utc",n.get("first_seen_utc",pd.Series(dtype=str))),utc=True,errors="coerce")
+ n["published_at"]=pd.to_datetime(n.get("published_utc",pd.Series(index=n.index,dtype=str)),utc=True,errors="coerce")
  n["category"]=n.get("category",pd.Series(dtype=str)).fillna("general")
  n["sentiment_hint"]=pd.to_numeric(n.get("sentiment_hint",pd.Series(dtype=int)),errors="coerce").fillna(0)
  n["text"]=n.get("text",pd.Series(dtype=str)).fillna("")
@@ -143,9 +144,16 @@ def build_symbol_features(news,candles,aliases=None):
  m=pd.DataFrame(matched); results=[]
  for row in candles[["symbol","open_time"]].drop_duplicates().itertuples(index=False):
   signal=pd.to_datetime(row.open_time,unit="ms",utc=True)+pd.Timedelta(days=1)
-  subset=m[(m.symbol==row.symbol)&(m.first_seen<signal)] if not m.empty else m
-  r24=subset[subset.first_seen>=signal-pd.Timedelta(hours=24)]
-  r7=subset[subset.first_seen>=signal-pd.Timedelta(days=7)]
+  subset=m[m.symbol==row.symbol].copy() if not m.empty else m.copy()
+  if not subset.empty:
+   # A feed snapshot may expose years-old articles today. Receipt time alone
+   # must not make stale publications look like fresh news.
+   known_pub=subset.published_at.notna()
+   subset=subset[(subset.available_at<signal)&
+    (~known_pub | ((subset.published_at<=signal)&(subset.published_at>=signal-pd.Timedelta(days=7))))]
+   subset=subset[subset.available_at>=signal-pd.Timedelta(days=7)]
+  r24=subset[subset.available_at>=signal-pd.Timedelta(hours=24)]
+  r7=subset
   cats=r7.category.astype(str)
   results.append({"symbol":row.symbol,"signal_time_utc":signal.isoformat().replace("+00:00","Z"),
    "news_count_24h":len(r24),"news_count_7d":len(r7),
@@ -388,10 +396,12 @@ def upload_news_to_supabase(news, supabase_url=None, secret_key=None):
   eligible=[]
   for row,news_id in news_by_id:
    if event["symbol"] not in row["matched_symbols"]: continue
-   available=pd.to_datetime(row["available_at_utc"],utc=True,errors="coerce")
-   if pd.isna(available) or available>=event_time: continue
-   age=event_time-available
-   if age<=pd.Timedelta(days=7): eligible.append((row,news_id,available))
+   available=pd.to_datetime(row.get("available_at_utc") or row.get("first_seen_utc"),utc=True,errors="coerce")
+   if pd.isna(available) or available>=event_time or event_time-available>pd.Timedelta(days=7): continue
+   published=pd.to_datetime(row.get("published_utc"),utc=True,errors="coerce")
+   # Old articles first discovered in a recent feed snapshot are not fresh news.
+   if not pd.isna(published) and (published>event_time or event_time-published>pd.Timedelta(days=7)): continue
+   eligible.append((row,news_id,available))
   last24=[x for x in eligible if event_time-x[2]<=pd.Timedelta(hours=24)]
   cats=[x[0]["category"] for x in eligible]
   feature_rows.append({"explosion_event_id":event["id"],"symbol":event["symbol"],
@@ -410,7 +420,9 @@ def upload_news_to_supabase(news, supabase_url=None, secret_key=None):
  summary={"news_events_upserted":len(prepared),"persisted_news_events_read":len(persisted_news),"explosion_events_read":len(events),
   "news_symbol_features_upserted":len(feature_rows),
   "events_with_any_news":sum(r["news_count_7d"]>0 for r in feature_rows),
-  "availability_rule":"available_at_utc < explosion_events.event_time; published_utc is never treated as availability"}
+  "availability_rule":"available_at_utc < event_time AND (published_utc is null OR published_utc is within the prior 7 days and not in the future); published_utc is never treated as availability",
+  "events_with_any_news":sum(r["news_count_7d"]>0 for r in feature_rows),
+  "stale_published_articles_excluded":True}
  print(json.dumps({"supabase_news_upload":summary},indent=2))
  return summary
 
