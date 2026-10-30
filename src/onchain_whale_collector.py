@@ -10,7 +10,7 @@ import argparse
 import json
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import requests
@@ -22,11 +22,11 @@ PAGE_SIZE = 1000
 MAX_PAGES = 100
 
 EVM_QUERY = """
-query AllTokenTransfers($hoursAgo: Int!, $limit: Int!, $offset: Int!) {
+query AllTokenTransfers($since: ISO8601DateTime!, $till: ISO8601DateTime!, $limit: Int!, $offset: Int!) {
   EVM(dataset: realtime, network: NETWORK_PLACEHOLDER) {
     Transfers(
       where: {
-        Block: {Time: {since_relative: {hours_ago: $hoursAgo}}}
+        Block: {Time: {since: $since, till: $till}}
         Transfer: {Success: true}
       }
       limit: {count: $limit, offset: $offset}
@@ -44,11 +44,11 @@ query AllTokenTransfers($hoursAgo: Int!, $limit: Int!, $offset: Int!) {
 """
 
 SOLANA_QUERY = """
-query AllTokenTransfers($hoursAgo: Int!, $limit: Int!, $offset: Int!) {
+query AllTokenTransfers($since: ISO8601DateTime!, $till: ISO8601DateTime!, $limit: Int!, $offset: Int!) {
   Solana(dataset: realtime) {
     Transfers(
       where: {
-        Block: {Time: {since_relative: {hours_ago: $hoursAgo}}}
+        Block: {Time: {since: $since, till: $till}}
       }
       limit: {count: $limit, offset: $offset}
       orderBy: {descending: Block_Time}
@@ -190,22 +190,30 @@ class BitqueryClient:
             raise RuntimeError(f"Bitquery GraphQL error: {payload['errors'][:2]}")
         return payload.get("data") or {}
 
-    def fetch_chain(self, chain: str, hours: int, max_pages: int = MAX_PAGES) -> list[dict[str, Any]]:
-        if chain not in {"ethereum", "bsc", "solana"}:
-            raise ValueError(f"Unsupported chain: {chain}")
-        query = SOLANA_QUERY if chain == "solana" else EVM_QUERY.replace(
-            "NETWORK_PLACEHOLDER", "eth" if chain == "ethereum" else "bsc"
-        )
-        root = "Solana" if chain == "solana" else "EVM"
+    def _fetch_interval(
+        self,
+        chain: str,
+        query: str,
+        root: str,
+        start: datetime,
+        end: datetime,
+        max_pages: int,
+        min_interval_seconds: float = 1.0,
+        depth: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Fetch a bounded interval; recursively split dense intervals at the page cap."""
         rows_by_key: dict[tuple[str, str, int], dict[str, Any]] = {}
+        capped = True
         for page in range(max_pages):
             data = self.query(query, {
-                "hoursAgo": hours,
+                "since": start.isoformat().replace("+00:00", "Z"),
+                "till": end.isoformat().replace("+00:00", "Z"),
                 "limit": PAGE_SIZE,
                 "offset": page * PAGE_SIZE,
             })
             items = ((data.get(root) or {}).get("Transfers") or [])
             if not items:
+                capped = False
                 break
             for item in items:
                 row = normalize_solana_transfer(item) if chain == "solana" else normalize_evm_transfer(item, chain)
@@ -213,14 +221,44 @@ class BitqueryClient:
                     key = (row["chain"], row["tx_hash"], row["event_index"])
                     rows_by_key[key] = row
             if len(items) < PAGE_SIZE:
+                capped = False
                 break
-        else:
-            # Never silently present a capped/truncated page scan as complete.
+
+        if not capped:
+            return list(rows_by_key.values())
+
+        duration = (end - start).total_seconds()
+        if duration <= min_interval_seconds or depth >= 24:
             raise RuntimeError(
-                f"{chain}: reached MAX_PAGES={max_pages} with full pages; "
-                "collection is incomplete. Increase the page budget or use smaller time windows."
+                f"{chain}: interval {start.isoformat()}..{end.isoformat()} still exceeds "
+                f"{max_pages * PAGE_SIZE} rows at minimum split size; cannot guarantee complete collection."
             )
+
+        midpoint = start + (end - start) / 2
+        # A one-second overlap protects transfers exactly on a split boundary;
+        # event keys are deduplicated before upload.
+        overlap = min(1.0, duration / 100.0)
+        left_end = min(end, midpoint + timedelta(seconds=overlap))
+        right_start = max(start, midpoint - __import__("datetime").timedelta(seconds=overlap))
+        left = self._fetch_interval(chain, query, root, start, left_end, max_pages, min_interval_seconds, depth + 1)
+        right = self._fetch_interval(chain, query, root, right_start, end, max_pages, min_interval_seconds, depth + 1)
+        for row in right:
+            rows_by_key[(row["chain"], row["tx_hash"], row["event_index"])] = row
+        for row in left:
+            rows_by_key[(row["chain"], row["tx_hash"], row["event_index"])] = row
         return list(rows_by_key.values())
+
+    def fetch_chain(self, chain: str, hours: int, max_pages: int = MAX_PAGES) -> list[dict[str, Any]]:
+        if chain not in {"ethereum", "bsc", "solana"}:
+            raise ValueError(f"Unsupported chain: {chain}")
+        query = SOLANA_QUERY if chain == "solana" else EVM_QUERY.replace(
+            "NETWORK_PLACEHOLDER", "eth" if chain == "ethereum" else "bsc"
+        )
+        root = "Solana" if chain == "solana" else "EVM"
+        end = datetime.now(timezone.utc)
+        start = end - __import__("datetime").timedelta(hours=hours)
+        return self._fetch_interval(chain, query, root, start, end, max_pages)
+
 
 
 def upload_transfers(rows: list[dict[str, Any]], session: requests.Session | None = None) -> int:
