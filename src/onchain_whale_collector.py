@@ -172,7 +172,8 @@ class BitqueryClient:
             json={"query": query, "variables": variables},
             timeout=60,
         )
-        response.raise_for_status()
+        if not response.ok:
+            raise RuntimeError(f"Bitquery HTTP {response.status_code}: {response.text[:500]}")
         payload = response.json()
         if payload.get("errors"):
             raise RuntimeError(f"Bitquery GraphQL error: {payload['errors'][:2]}")
