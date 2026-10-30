@@ -1,4 +1,4 @@
-name: On-chain Whale Transfer Collector
+name: On-chain All-Token Transfer Collector
 
 on:
   push:
@@ -8,17 +8,18 @@ on:
       - '.github/workflows/onchain-whale-collector.yml'
       - 'src/onchain_whale_collector.py'
       - 'tests/test_onchain_whale_collector.py'
+      - 'config/onchain_whale_chains.json'
   workflow_dispatch:
     inputs:
-      min_usd:
-        description: "Minimum provider-valued transfer size in USD"
-        required: false
-        default: "100000"
-        type: string
       lookback_hours:
-        description: "Lookback window (1-24 hours)"
+        description: "Overlapping lookback window (1-24 hours)"
         required: false
-        default: "3"
+        default: "1"
+        type: string
+      max_pages:
+        description: "Maximum pages per chain; run fails rather than silently truncate"
+        required: false
+        default: "100"
         type: string
   schedule:
     - cron: "17,47 * * * *"
@@ -33,7 +34,7 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,10 +50,11 @@ jobs:
           pip install pytest
       - name: Run test suite
         run: python -m pytest -q
-      - name: Collect large on-chain transfers
+      - name: Collect all token transfers (no USD threshold)
         env:
           BITQUERY_ACCESS_TOKEN: ${{ secrets.BITQUERY_ACCESS_TOKEN }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
-          WHALE_MIN_TRANSFER_USD: ${{ inputs.min_usd || '100000' }}
-        run: python -m src.onchain_whale_collector --min-usd "${WHALE_MIN_TRANSFER_USD}" --hours "${{ inputs.lookback_hours || '3' }}"
+          ONCHAIN_LOOKBACK_HOURS: ${{ inputs.lookback_hours || '1' }}
+          ONCHAIN_MAX_PAGES: ${{ inputs.max_pages || '100' }}
+        run: python -m src.onchain_whale_collector --hours "${ONCHAIN_LOOKBACK_HOURS}" --max-pages "${ONCHAIN_MAX_PAGES}"
