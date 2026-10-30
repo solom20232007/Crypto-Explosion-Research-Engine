@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -166,14 +167,27 @@ class BitqueryClient:
         self.session = session or requests.Session()
 
     def query(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
-        response = self.session.post(
-            BITQUERY_URL,
-            headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
-            json={"query": query, "variables": variables},
-            timeout=60,
-        )
-        if not response.ok:
-            raise RuntimeError(f"Bitquery HTTP {response.status_code}: {response.text[:500]}")
+        response = None
+        for attempt in range(4):
+            response = self.session.post(
+                BITQUERY_URL,
+                headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
+                json={"query": query, "variables": variables},
+                timeout=60,
+            )
+            if response.status_code not in (429, 500, 502, 503, 504):
+                break
+            if attempt < 3:
+                retry_after = response.headers.get("Retry-After")
+                try:
+                    delay = max(10, min(120, int(retry_after))) if retry_after else 30 * (attempt + 1)
+                except ValueError:
+                    delay = 30 * (attempt + 1)
+                time.sleep(delay)
+        if response is None or not response.ok:
+            status = response.status_code if response is not None else "no-response"
+            body = response.text[:500] if response is not None else ""
+            raise RuntimeError(f"Bitquery HTTP {status}: {body}")
         payload = response.json()
         if payload.get("errors"):
             raise RuntimeError(f"Bitquery GraphQL error: {payload['errors'][:2]}")
