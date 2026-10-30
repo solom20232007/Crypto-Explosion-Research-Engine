@@ -1,4 +1,6 @@
-from datetime import datetime, timezone\n\nfrom src.onchain_whale_collector import (
+from datetime import datetime, timezone
+
+from src.onchain_whale_collector import (
     EVM_QUERY,
     SOLANA_QUERY,
     BitqueryClient,
@@ -64,7 +66,7 @@ def test_fetch_chain_keeps_rows_with_missing_or_small_usd_and_deduplicates():
             pass
 
         def query(self, query, variables):
-            assert "minUsd" not in variables
+            assert "since" in variables and "till" in variables
             return {"EVM": {"Transfers": [item]}}
 
     rows = FakeClient().fetch_chain("ethereum", hours=1, max_pages=2)
@@ -73,8 +75,6 @@ def test_fetch_chain_keeps_rows_with_missing_or_small_usd_and_deduplicates():
 
 
 def test_fetch_chain_splits_dense_intervals_instead_of_truncating():
-    from datetime import datetime
-
     item = {
         "Block": {"Time": "2026-10-31T10:00:00Z", "Number": 123},
         "Transaction": {"Hash": "0xsplit"},
