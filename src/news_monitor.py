@@ -374,7 +374,7 @@ def upload_news_to_supabase(news, supabase_url=None, secret_key=None):
  persisted_news=[]; offset=0
  while True:
   page=_supabase_request(url,key,"GET","news_events",
-   params={"select":"id,fingerprint,title,summary,source_domain,category,sentiment_hint,first_seen_utc,available_at_utc,matched_symbols"},
+   params={"select":"id,fingerprint,title,summary,source_domain,category,sentiment_hint,published_utc,first_seen_utc,available_at_utc,matched_symbols"},
    offset=offset,limit=1000)
   persisted_news.extend(page)
   if len(page)<1000: break
