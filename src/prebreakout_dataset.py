@@ -21,7 +21,17 @@ def build_dataset(candles: pd.DataFrame) -> pd.DataFrame:
     groups = f.groupby("symbol", sort=False, group_keys=False)
     g = f.groupby("symbol", sort=False)
     prev_close = g.close.shift(1)
-    f["date_utc"] = pd.to_datetime(f.open_time, unit="ms", utc=True).dt.strftime("%Y-%m-%d")
+    dt_utc = pd.to_datetime(f.open_time, unit="ms", utc=True)
+    f["date_utc"] = dt_utc.dt.strftime("%Y-%m-%d")
+    # Calendar features use only the signal candle timestamp; daily bars have no intraday timing.
+    dow = dt_utc.dt.dayofweek
+    month = dt_utc.dt.month - 1
+    f["day_of_week_sin"] = np.sin(2 * np.pi * dow / 7)
+    f["day_of_week_cos"] = np.cos(2 * np.pi * dow / 7)
+    f["month_sin"] = np.sin(2 * np.pi * month / 12)
+    f["month_cos"] = np.cos(2 * np.pi * month / 12)
+    first_seen = g.open_time.transform("min")
+    f["days_since_first_seen"] = ((f.open_time - first_seen) / 86400000).clip(lower=0)
     # All predictors use the signal-day candle and earlier data only.
     f["return_1d_pct"] = (f.close / prev_close - 1) * 100
     f["return_3d_pct"] = (f.close / g.close.shift(3) - 1) * 100
@@ -49,6 +59,20 @@ def build_dataset(candles: pd.DataFrame) -> pd.DataFrame:
     f["ema21_vs_ema50_pct"] = (f.ema_21 / f.ema_50 - 1) * 100
     f["macd_pct"] = (g.close.transform(lambda s: s.ewm(span=12, adjust=False).mean() - s.ewm(span=26, adjust=False).mean()) / f.close) * 100
     f["macd_signal_pct"] = (g.close.transform(lambda s: (s.ewm(span=12, adjust=False).mean() - s.ewm(span=26, adjust=False).mean()).ewm(span=9, adjust=False).mean()) / f.close) * 100
+    macd_hist = f["macd_pct"] - f["macd_signal_pct"]
+    prev_macd_hist = macd_hist.groupby(f.symbol, sort=False).shift(1)
+    f["macd_histogram_pct"] = macd_hist
+    f["macd_bullish_cross"] = ((macd_hist > 0) & (prev_macd_hist <= 0)).fillna(False).astype("int8")
+    f["macd_bearish_cross"] = ((macd_hist < 0) & (prev_macd_hist >= 0)).fillna(False).astype("int8")
+    ema_spread = f["ema_9"] - f["ema_21"]
+    prev_ema_spread = ema_spread.groupby(f.symbol, sort=False).shift(1)
+    f["ema9_21_bullish_cross"] = ((ema_spread > 0) & (prev_ema_spread <= 0)).fillna(False).astype("int8")
+    f["ema9_21_bearish_cross"] = ((ema_spread < 0) & (prev_ema_spread >= 0)).fillna(False).astype("int8")
+    f["_bar_index"] = g.cumcount()
+    for event_col in ("macd_bullish_cross", "macd_bearish_cross", "ema9_21_bullish_cross", "ema9_21_bearish_cross"):
+        last_event_bar = f["_bar_index"].where(f[event_col].eq(1)).groupby(f.symbol, sort=False).ffill()
+        f[f"bars_since_{event_col}"] = f["_bar_index"] - last_event_bar
+    f = f.drop(columns=["_bar_index"])
     delta = g.close.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
@@ -56,6 +80,14 @@ def build_dataset(candles: pd.DataFrame) -> pd.DataFrame:
     avg_loss = loss.groupby(f.symbol, sort=False).transform(lambda s: s.ewm(alpha=1/14, adjust=False, min_periods=14).mean())
     rs = avg_gain / avg_loss.replace(0, np.nan)
     f["rsi_14"] = 100 - (100 / (1 + rs))
+    prev_rsi = f["rsi_14"].groupby(f.symbol, sort=False).shift(1)
+    f["rsi_cross_up_30"] = ((f.rsi_14 >= 30) & (prev_rsi < 30)).fillna(False).astype("int8")
+    f["rsi_cross_up_50"] = ((f.rsi_14 >= 50) & (prev_rsi < 50)).fillna(False).astype("int8")
+    f["rsi_cross_down_70"] = ((f.rsi_14 <= 70) & (prev_rsi > 70)).fillna(False).astype("int8")
+    f["rsi_overbought_70"] = (f.rsi_14 >= 70).fillna(False).astype("int8")
+    f["rsi_oversold_30"] = (f.rsi_14 <= 30).fillna(False).astype("int8")
+    f["ema_bullish_alignment"] = ((f.ema_9 > f.ema_21) & (f.ema_21 > f.ema_50)).fillna(False).astype("int8")
+    f["price_above_ema50"] = (f.close > f.ema_50).fillna(False).astype("int8")
     previous_close = g.close.shift(1)
     true_range = pd.concat([f.high - f.low, (f.high - previous_close).abs(), (f.low - previous_close).abs()], axis=1).max(axis=1)
     f["atr_14_pct"] = true_range.groupby(f.symbol, sort=False).transform(lambda s: s.ewm(alpha=1/14, adjust=False, min_periods=14).mean()) / f.close * 100
