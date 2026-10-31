@@ -1,13 +1,6 @@
 name: Routescan Global EVM Transfer Collector
 
 on:
-  push:
-    branches:
-      - research/binance-prebreakout-advisor-v1
-    paths:
-      - ".github/workflows/routescan-whale-collector.yml"
-      - "src/routescan_whale_collector.py"
-      - "tests/test_routescan_whale_collector.py"
   workflow_dispatch:
     inputs:
       lookback_hours:
