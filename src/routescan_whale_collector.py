@@ -150,7 +150,7 @@ class RoutescanClient:
             if budget[0] >= max_total_requests:
                 raise RuntimeError(
                     f"Routescan {chain}: safety cap of {max_total_requests} requests per chain reached; "
-                    "collection stopped without uploading partial results."
+                    "collection stopped; previously completed intervals were already uploaded."
                 )
             budget[0] += 1
             if cursor:
@@ -236,15 +236,17 @@ def collect(hours: int = 1, max_pages: int = 50,
     counts: dict[str, int] = {}
     uploaded_attempted = 0
     for chain, chain_id in DEFAULT_CHAINS.items():
-        chain_rows = 0
 
         def persist_completed_interval(rows: list[dict[str, Any]]) -> None:
-            nonlocal chain_rows, uploaded_attempted
+            nonlocal uploaded_attempted
             observed = datetime.now(timezone.utc).isoformat()
             for row in rows:
                 row["observed_at_utc"] = observed
-            chain_rows += len(rows)
-            uploaded_attempted += upload_transfers(rows)
+            inserted_attempt = upload_transfers(rows)
+            uploaded_attempted += inserted_attempt
+            print(json.dumps({"provider": PROVIDER, "chain": chain,
+                              "checkpoint_rows_attempted": inserted_attempt,
+                              "uploaded_attempted_total": uploaded_attempted}, sort_keys=True), flush=True)
 
         rows = client.fetch_chain(chain, chain_id, hours=hours, max_pages=max_pages,
                                   max_total_requests=max_total_requests,
