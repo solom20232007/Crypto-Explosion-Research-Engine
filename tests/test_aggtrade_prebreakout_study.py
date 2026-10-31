@@ -22,6 +22,15 @@ class AggtradePrebreakoutStudyTests(unittest.TestCase):
         self.assertAlmostEqual(result["h1_buy_ratio"], 2 / 3, places=4)
         self.assertEqual(result["h6_trade_count"], 3)
 
+    def test_normalizes_millisecond_and_microsecond_timestamps(self):
+        from src.aggtrade_prebreakout_study import normalize_aggtrade_timestamps_ms
+
+        values = pd.Series([1_755_720_320_563, 1_755_720_320_563_251])
+        normalized = normalize_aggtrade_timestamps_ms(values)
+        self.assertEqual(int(normalized.iloc[0]), 1_755_720_320_563)
+        self.assertEqual(int(normalized.iloc[1]), 1_755_720_320_563)
+
+
     def test_anchor_prefers_earliest_confirmed_timestamp(self):
         row = {
             "confirmed_15pct_24h_signal_time_utc": "2026-01-02T10:00:00Z",
