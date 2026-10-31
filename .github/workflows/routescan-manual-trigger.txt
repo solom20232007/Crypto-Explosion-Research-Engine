@@ -1,1 +1,3 @@
 One-time trigger for the Routescan collector on the research branch only. Safe to leave unchanged; no recurring schedule.
+
+Validated Decimal JSON serialization; trigger controlled one-hour Routescan collection after tests passed.
