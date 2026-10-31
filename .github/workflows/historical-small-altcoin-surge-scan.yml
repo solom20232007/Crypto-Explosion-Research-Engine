@@ -7,6 +7,8 @@ on:
     paths:
       - .github/workflows/historical-small-altcoin-surge-scan.yml
       - src/historical_surge_scanner.py
+      - src/surge_lifecycle_analysis.py
+      - tests/test_surge_lifecycle_analysis.py
       - tests/test_historical_surge_scanner.py
       - src/prebreakout_dataset.py
       - tests/test_prebreakout_dataset.py
@@ -77,6 +79,8 @@ jobs:
         run: python -m src.prebreakout_dataset
       - name: Evaluate chronological baselines and model
         run: python -m src.evaluate_prebreakout
+      - name: Analyze episode lifecycle (during and after surge)
+        run: python -m src.surge_lifecycle_analysis
       - name: Audit historical data quality
         run: python -m src.audit_prebreakout_data
       - name: Validate outputs
@@ -91,14 +95,18 @@ jobs:
           context=pd.read_csv(root/"surge_pre_event_context.csv")
           daily=pd.read_csv(root/"daily_candles.csv")
           dataset=pd.read_csv("reports/prebreakout_dataset/prebreakout_dataset.csv")
+          episodes=pd.read_csv(root/"surge_episodes_lifecycle.csv")
+          lifecycle=json.loads((root/"surge_lifecycle_summary.json").read_text())
           assert len(daily)>0 and len(dataset)>0
           assert not {"BTCUSDT","ETHUSDT","SOLUSDT"}.intersection(set(dataset.symbol))
           assert summary["symbols_scanned"]>0
+          assert len(episodes)>0 and lifecycle["episode_count"]==len(episodes)
           assert not {"BTCUSDT","ETHUSDT","SOLUSDT"}.intersection(set(events.get("symbol",[])))
           print(json.dumps({"symbols_scanned":summary["symbols_scanned"],"event_rows":summary["event_rows"],
             "selected_events_with_hourly_context":summary["selected_events_with_hourly_context"],
             "daily_candle_rows":len(daily),"dataset_rows":len(dataset),
             "failed_symbols":summary["symbols_with_errors"],"context_rows":len(context),
+            "deduplicated_episodes":len(episodes),
             "survivorship_bias_warning":summary["survivorship_bias_warning"]},indent=2))
           PY
       - uses: actions/upload-artifact@v4
