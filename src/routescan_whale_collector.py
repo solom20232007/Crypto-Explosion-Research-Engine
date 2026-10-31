@@ -14,6 +14,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -116,6 +117,22 @@ class RoutescanClient:
             return payload
         raise RuntimeError("Routescan request failed after retries")
 
+    @staticmethod
+    def _cursor_from_link(link: dict[str, Any]) -> str | None:
+        direct = link.get("nextToken")
+        if direct:
+            return str(direct)
+        next_link = link.get("next")
+        if not next_link:
+            return None
+        parsed = urlparse(str(next_link))
+        query = parse_qs(parsed.query)
+        values = query.get("next")
+        if values:
+            return values[-1]
+        # Some API versions return the opaque cursor directly.
+        return str(next_link) if "://" not in str(next_link) and "?" not in str(next_link) else None
+
     def fetch_chain(self, chain: str, chain_id: int, hours: int = 2,
                     max_pages: int = 100) -> list[dict[str, Any]]:
         end = datetime.now(timezone.utc)
@@ -139,7 +156,7 @@ class RoutescanClient:
                     key = (row["chain"], row["tx_hash"], row["event_index"])
                     rows[key] = row
             link = payload.get("link") or {}
-            next_cursor = link.get("next") or link.get("nextToken")
+            next_cursor = self._cursor_from_link(link)
             if not next_cursor or not items:
                 return list(rows.values())
             if next_cursor == cursor:
