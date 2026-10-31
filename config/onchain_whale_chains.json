@@ -65,7 +65,10 @@
       "free_keyless_limit_calls_per_day": 10000,
       "page_size": 100,
       "schedule_target": "hourly_after_validation",
-      "usd_filter": "none"
+      "usd_filter": "none",
+      "max_pages_per_window": 50,
+      "max_total_requests_per_chain_per_run": 200,
+      "target_schedule": "every 2 hours after validation"
     },
     "ankr": {
       "enabled": false,
