@@ -12,7 +12,7 @@ import pandas as pd
 import requests
 
 BASES = ("https://data-api.binance.vision", "https://api.binance.com")
-EXCLUDED = {"BTC", "ETH", "SOL", "USDT", "USDC", "FDUSD", "TUSD", "USDP", "DAI", "BUSD", "USDE", "USDD", "EUR", "TRY", "BRL", "GBP", "AUD", "BIDR", "IDRT", "UAH", "RUB", "ZAR", "PLN", "RON", "ARS", "JPY"}
+EXCLUDED = {"BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", "TRX", "TON", "LINK", "AVAX", "DOT", "BCH", "LTC", "ETC", "XLM", "SUI", "USDT", "USDC", "FDUSD", "TUSD", "USDP", "DAI", "BUSD", "USDE", "USDD", "EUR", "TRY", "BRL", "GBP", "AUD", "BIDR", "IDRT", "UAH", "RUB", "ZAR", "PLN", "RON", "ARS", "JPY"}
 LEVERAGED = ("UP", "DOWN", "BULL", "BEAR", "2L", "2S", "3L", "3S", "5L", "5S")
 OUT = Path("reports/orderbook_liquidity")
 
@@ -119,69 +119,138 @@ def calculate_metrics(symbol, book, captured_at, notionals=(1000, 5000)):
     return row
 
 
-def collect(max_symbols=100, min_quote_volume=100000, pause=0.08, output_dir=OUT):
-    info = get_json("/api/v3/exchangeInfo")
-    eligible = set(eligible_symbols(info))
-    tickers = get_json("/api/v3/ticker/24hr")
-    liquid = []
+def select_volume_candidates(tickers, eligible, min_quote_volume=250000, min_trades=500):
+    """Cheap first-stage screen using Binance 24h ticker statistics."""
+    candidates = []
     for ticker in tickers:
-        symbol = ticker.get("symbol")
+        symbol = str(ticker.get("symbol", "")).upper()
         if symbol not in eligible:
             continue
         try:
-            quote_volume = float(ticker.get("quoteVolume", 0))
+            quote_volume = float(ticker.get("quoteVolume", 0) or 0)
+            trades = int(ticker.get("count", 0) or 0)
         except (TypeError, ValueError):
             continue
-        if quote_volume >= min_quote_volume:
-            liquid.append((symbol, quote_volume))
-    liquid.sort(key=lambda item: item[1], reverse=True)
-    selected = liquid[:max(1, int(max_symbols))]
+        if quote_volume < float(min_quote_volume) or trades < int(min_trades):
+            continue
+        candidates.append({
+            "symbol": symbol,
+            "quote_volume_24h_usdt": round(quote_volume, 2),
+            "trades_24h": trades,
+            "price_change_24h_pct": float(ticker.get("priceChangePercent", 0) or 0),
+        })
+    return sorted(candidates, key=lambda row: row["quote_volume_24h_usdt"], reverse=True)
+
+
+def _spread_bps(book_ticker):
+    try:
+        bid, ask = float(book_ticker["bidPrice"]), float(book_ticker["askPrice"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    mid = (bid + ask) / 2
+    if bid <= 0 or ask <= 0 or ask < bid or mid <= 0:
+        return None
+    return (ask - bid) / mid * 10000
+
+
+def collect(max_symbols=60, min_quote_volume=250000, pause=0.08, output_dir=OUT,
+            min_trades=500, max_spread_bps=75, min_side_depth_usdt=2500):
+    """Screen small/mid-altcoin proxies, then deeply inspect only liquid candidates.
+
+    Binance public Spot metadata does not expose market capitalization. The
+    universe excludes major assets/stablecoins/leveraged tokens and uses
+    explicit liquidity gates; it is not a market-cap-ranked small-cap universe.
+    """
+    info = get_json("/api/v3/exchangeInfo")
+    eligible = set(eligible_symbols(info))
+    tickers = get_json("/api/v3/ticker/24hr")
+    volume_candidates = select_volume_candidates(
+        tickers, eligible, min_quote_volume=min_quote_volume, min_trades=min_trades
+    )
+    book_tickers = get_json("/api/v3/ticker/bookTicker")
+    spread_map = {str(row.get("symbol", "")).upper(): _spread_bps(row)
+                  for row in book_tickers if row.get("symbol")}
+    spread_candidates = []
+    for candidate in volume_candidates:
+        spread = spread_map.get(candidate["symbol"])
+        if spread is None or spread > float(max_spread_bps):
+            continue
+        spread_candidates.append({**candidate, "spread_bps": round(spread, 4)})
+    selected = spread_candidates[:max(1, int(max_symbols))]
+
     captured = datetime.now(timezone.utc).isoformat()
-    rows, errors = [], []
-    for index, (symbol, quote_volume) in enumerate(selected):
+    rows, errors, rejected_depth = [], [], []
+    for index, candidate in enumerate(selected):
+        symbol = candidate["symbol"]
         try:
             book = get_json("/api/v3/depth", {"symbol": symbol, "limit": 100})
             row = calculate_metrics(symbol, book, captured)
-            row["quote_volume_24h_usdt"] = round(quote_volume, 2)
-            rows.append(row)
-        except Exception as exc:  # retain per-symbol failures for auditability
+            row.update(candidate)
+            row["screening_stage"] = "orderbook_depth"
+            bid_depth = row["depth_bid_usdt_1pct"]
+            ask_depth = row["depth_ask_usdt_1pct"]
+            if bid_depth < float(min_side_depth_usdt) or ask_depth < float(min_side_depth_usdt):
+                rejected_depth.append({
+                    "symbol": symbol, "bid_depth_1pct_usdt": bid_depth,
+                    "ask_depth_1pct_usdt": ask_depth, "reason": "insufficient_two_sided_depth",
+                })
+            else:
+                row["candidate_status"] = "qualified_for_deep_monitoring"
+                rows.append(row)
+        except Exception as exc:
             errors.append({"symbol": symbol, "error": str(exc)[:300]})
         if index + 1 < len(selected):
             time.sleep(max(0.0, pause))
+
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    csv_path = output_dir / f"orderbook_snapshot_{stamp}.csv"
-    json_path = output_dir / f"orderbook_snapshot_{stamp}.json"
+    csv_path = output_dir / f"qualified_candidates_{stamp}.csv"
+    json_path = output_dir / f"qualified_candidates_{stamp}.json"
     pd.DataFrame(rows).to_csv(csv_path, index=False)
     summary = {
         "captured_at_utc": captured,
-        "symbols_eligible": len(eligible),
-        "symbols_meeting_volume_floor": len(liquid),
-        "symbols_requested": len(selected),
-        "symbols_captured": len(rows),
+        "universe": "Binance Spot USDT pairs excluding major assets, stablecoins and leveraged tokens",
+        "market_cap_note": "Binance Spot API has no market-cap field; this is a liquidity-screened small/mid-altcoin proxy, not a verified market-cap ranking.",
+        "symbols_in_universe": len(eligible),
+        "symbols_meeting_volume_and_trade_floor": len(volume_candidates),
+        "symbols_passing_spread": len(spread_candidates),
+        "symbols_orderbook_checked": len(selected),
+        "symbols_qualified_for_deep_monitoring": len(rows),
+        "symbols_rejected_for_depth": len(rejected_depth),
         "symbols_with_errors": len(errors),
-        "min_quote_volume_usdt": min_quote_volume,
-        "book_limit": 100,
-        "historical_depth_available": False,
-        "warning": "Order-book snapshots are live observations and cannot be used as historical pre-breakout features unless separately archived with trustworthy timestamps.",
+        "thresholds": {
+            "min_quote_volume_24h_usdt": float(min_quote_volume),
+            "min_trades_24h": int(min_trades),
+            "max_spread_bps": float(max_spread_bps),
+            "min_bid_and_ask_depth_within_1pct_usdt": float(min_side_depth_usdt),
+            "max_symbols_orderbook_checked": int(max_symbols),
+        },
+        "historical_orderbook_depth_available": False,
         "errors": errors,
+        "rejected_depth_sample": rejected_depth[:20],
         "csv_file": str(csv_path),
+        "json_file": str(json_path),
     }
-    json_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    print(json.dumps({k: v for k, v in summary.items() if k != "errors"} | {"errors_sample": errors[:10]}, indent=2))
+    json_path.write_text(json.dumps({"summary": summary, "candidates": rows}, indent=2), encoding="utf-8")
+    print(json.dumps({k: v for k, v in summary.items() if k not in {"errors", "rejected_depth_sample"}} |
+                     {"errors_sample": errors[:10], "rejected_depth_sample": rejected_depth[:10]}, indent=2))
     if not rows:
-        raise RuntimeError("No order-book snapshots collected; inspect API access and errors")
+        raise RuntimeError("No Binance small/mid-altcoin candidates passed volume, spread and two-sided depth gates")
     return rows, summary
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--max-symbols", type=int, default=int(os.getenv("MAX_SYMBOLS", "100")))
-    parser.add_argument("--min-quote-volume", type=float, default=float(os.getenv("MIN_QUOTE_VOLUME", "100000")))
+    parser.add_argument("--max-symbols", type=int, default=int(os.getenv("MAX_SYMBOLS", "60")))
+    parser.add_argument("--min-quote-volume", type=float, default=float(os.getenv("MIN_QUOTE_VOLUME", "250000")))
+    parser.add_argument("--min-trades", type=int, default=int(os.getenv("MIN_TRADES", "500")))
+    parser.add_argument("--max-spread-bps", type=float, default=float(os.getenv("MAX_SPREAD_BPS", "75")))
+    parser.add_argument("--min-side-depth-usdt", type=float, default=float(os.getenv("MIN_SIDE_DEPTH_USDT", "2500")))
     parser.add_argument("--pause", type=float, default=0.08)
     args = parser.parse_args()
-    collect(args.max_symbols, args.min_quote_volume, args.pause)
+    collect(args.max_symbols, args.min_quote_volume, args.pause, min_trades=args.min_trades,
+            max_spread_bps=args.max_spread_bps, min_side_depth_usdt=args.min_side_depth_usdt)
 
 
 if __name__ == "__main__":
