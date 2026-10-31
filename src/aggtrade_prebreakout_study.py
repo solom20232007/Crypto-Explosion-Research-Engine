@@ -165,6 +165,17 @@ def _download_day(session, symbol, day, cache_dir, pause=0.1):
     raise last or RuntimeError("aggTrades archive download failed")
 
 
+def normalize_aggtrade_timestamps_ms(values):
+    """Normalize Binance aggTrades timestamps to milliseconds.
+
+    Binance public archives can contain millisecond timestamps (13 digits)
+    or microsecond timestamps (16 digits). Normalize by magnitude before
+    applying any event-window filters.
+    """
+    numeric = pd.to_numeric(values, errors="coerce")
+    return numeric.where(numeric < 100_000_000_000_000, numeric / 1000)
+
+
 def load_window_trades(session, symbol, anchor_ms, cache_dir, pause=0.1):
     start_ms = anchor_ms - 72 * HOUR_MS
     first_day = (start_ms // DAY_MS) * DAY_MS
@@ -181,7 +192,7 @@ def load_window_trades(session, symbol, anchor_ms, cache_dir, pause=0.1):
                 csv_name = next(n for n in archive.namelist() if n.lower().endswith(".csv"))
                 with archive.open(csv_name) as handle:
                     part = pd.read_csv(handle, header=None, names=COLS)
-            part["timestamp"] = pd.to_numeric(part.timestamp, errors="coerce")
+            part["timestamp"] = normalize_aggtrade_timestamps_ms(part.timestamp)
             part["price"] = pd.to_numeric(part.price, errors="coerce")
             part["quantity"] = pd.to_numeric(part.quantity, errors="coerce")
             part["is_buyer_maker"] = part.is_buyer_maker.astype(str).str.lower().map(
@@ -314,6 +325,7 @@ def run(input_dir, out_dir, cases_per_tier=25, pause=0.1):
         "fetch_errors": errors,
         "group_summary": group_summary,
         "feature_windows_hours": [72, 24, 6, 1],
+        "timestamp_normalization": "13-digit millisecond and 16-digit microsecond timestamps are normalized to milliseconds before filtering.",
         "large_trade_definition": "Top 1% of quote-notional aggTrades within each case's preceding 72-hour window; descriptive size proxy, not wallet/whale identity.",
         "aggressor_definition": "isBuyerMaker=false means aggressive buyer; true means aggressive seller.",
         "limitations": [
@@ -321,7 +333,8 @@ def run(input_dir, out_dir, cases_per_tier=25, pause=0.1):
             "Events originate from the existing daily-trigger catalog and currently listed Binance Spot USDT pairs, retaining survivorship and discovery-selection bias.",
             "Control matching is observational and does not establish causality.",
             "aggTrades does not identify wallets or beneficial owners.",
-            "Archive files unavailable for any required UTC day make that case incomplete and exclude it from complete-case group summaries."
+            "Archive files unavailable for any required UTC day make that case incomplete and exclude it from complete-case group summaries.",
+            "Binance aggTrades archives may encode timestamps in milliseconds or microseconds; values are normalized before window filtering."
         ],
     }
     (out_dir / "aggtrade_prebreakout_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
