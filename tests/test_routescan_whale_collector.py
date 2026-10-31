@@ -132,3 +132,29 @@ def test_routescan_splits_dense_windows_and_deduplicates_overlap():
     assert session.calls == 3
     assert len(rows) == 1
     assert rows[0]["tx_hash"] == "0xabc"
+
+
+def test_routescan_enforces_total_request_budget():
+    item = sample_transfer()
+
+    class FakeResponse:
+        status_code = 200
+        headers = {}
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"items": [item], "link": {"next": "cursor"}}
+
+    class FakeSession:
+        def get(self, *args, **kwargs):
+            return FakeResponse()
+
+    client = RoutescanClient(session=FakeSession(), sleep=lambda _: None)
+    try:
+        client.fetch_chain("ethereum", 1, hours=1, max_pages=1, max_total_requests=1)
+    except RuntimeError as exc:
+        assert "safety cap of 1 requests per chain" in str(exc)
+    else:
+        raise AssertionError("Expected request budget protection")
