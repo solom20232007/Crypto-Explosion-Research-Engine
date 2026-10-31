@@ -24,6 +24,10 @@ class HistoricalSurgeScannerTests(unittest.TestCase):
         self.assertEqual(set(events.symbol), {"PEPEUSDT"})
         self.assertTrue(events.event_date_utc.is_monotonic_increasing)
         self.assertTrue((events.daily_high_change_pct>=25).any())
+        self.assertIn("early_surge_1d_high", ",".join(events.trigger_types))
+        self.assertIn("confirmed_1d_high", ",".join(events.trigger_types))
+        self.assertIn("two_day_high_change_pct", events.columns)
+        self.assertIn("three_day_close_change_pct", events.columns)
 
 
 if __name__ == "__main__":
