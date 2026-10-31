@@ -63,14 +63,44 @@ def summarize_context(hourly,symbol,date):
     if hourly.empty: return {"symbol":symbol,"event_date_utc":date,"hourly_rows":0}
     f=hourly.copy()
     for c in ("open_time","close","high","low","quote_volume"): f[c]=pd.to_numeric(f[c],errors="coerce")
-    t=int(pd.Timestamp(date,tz="UTC").timestamp()*1000); pre=f[f.open_time<t].sort_values("open_time"); last=pre.tail(24); prior=pre.tail(72).head(48)
+    t=int(pd.Timestamp(date,tz="UTC").timestamp()*1000); pre=f[f.open_time<t].sort_values("open_time").copy(); last=pre.tail(24); prior=pre.tail(72).head(48)
+    # Hourly indicators use pre-event candles only; no event-day or post-event bars enter.
+    close = pd.to_numeric(pre["close"], errors="coerce")
+    ema9 = close.ewm(span=9, adjust=False, min_periods=9).mean()
+    ema21 = close.ewm(span=21, adjust=False, min_periods=21).mean()
+    ema_spread = ema9 - ema21
+    macd_line = close.ewm(span=12, adjust=False).mean() - close.ewm(span=26, adjust=False).mean()
+    macd_signal = macd_line.ewm(span=9, adjust=False).mean()
+    macd_hist = macd_line - macd_signal
+    delta = close.diff()
+    avg_gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+    avg_loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+    rsi = 100 - 100 / (1 + avg_gain / avg_loss.replace(0, float("nan")))
+    ema_cross = (ema_spread > 0) & (ema_spread.shift(1) <= 0)
+    macd_cross = (macd_hist > 0) & (macd_hist.shift(1) <= 0)
+    def hours_since(mask):
+        hits = pre.loc[mask.fillna(False), "open_time"]
+        return round((t - float(hits.iloc[-1])) / 3600000, 2) if len(hits) else None
+    taker_ratio = None
+    if {"taker_buy_quote_volume", "quote_volume"}.issubset(pre.columns):
+        qv = pd.to_numeric(last["quote_volume"], errors="coerce").sum()
+        tb = pd.to_numeric(last["taker_buy_quote_volume"], errors="coerce").sum()
+        taker_ratio = round(float(tb / qv), 5) if qv > 0 else None
     a=last.quote_volume.mean() if len(last) else float("nan"); b=prior.quote_volume.mean() if len(prior) else float("nan")
     return {"symbol":symbol,"event_date_utc":date,"hourly_rows":len(f),
       "pre_event_24h_return_pct":round((last.close.iloc[-1]/last.close.iloc[0]-1)*100,4) if len(last)>1 else None,
       "pre_event_72h_return_pct":round((pre.close.iloc[-1]/pre.close.iloc[-min(72,len(pre))]-1)*100,4) if len(pre)>1 else None,
       "pre_event_24h_range_pct":round((last.high.max()/last.low.min()-1)*100,4) if len(last) and last.low.min()>0 else None,
       "pre_event_quote_volume_24h":round(float(last.quote_volume.sum()),4) if len(last) else None,
-      "pre_event_volume_ratio_24h_vs_prior48h":round(float(a/b),4) if pd.notna(a) and pd.notna(b) and b>0 else None}
+      "pre_event_volume_ratio_24h_vs_prior48h":round(float(a/b),4) if pd.notna(a) and pd.notna(b) and b>0 else None,
+      "hourly_ema9_21_bullish_crosses_72h":int(ema_cross.tail(72).fillna(False).sum()),
+      "hours_since_last_ema9_21_bullish_cross":hours_since(ema_cross),
+      "hourly_macd_bullish_crosses_72h":int(macd_cross.tail(72).fillna(False).sum()),
+      "hours_since_last_macd_bullish_cross":hours_since(macd_cross),
+      "hourly_macd_histogram_last":round(float(macd_hist.iloc[-1]),8) if len(macd_hist) and pd.notna(macd_hist.iloc[-1]) else None,
+      "hourly_rsi14_last":round(float(rsi.iloc[-1]),4) if len(rsi) and pd.notna(rsi.iloc[-1]) else None,
+      "hourly_ema9_vs_ema21_pct_last":round(float((ema9.iloc[-1]/ema21.iloc[-1]-1)*100),5) if len(ema21) and pd.notna(ema21.iloc[-1]) and ema21.iloc[-1] else None,
+      "taker_buy_quote_ratio_24h":taker_ratio}
 def run_scan(start,end,out_dir,max_symbols=None,max_events=250,min_quote_volume_usdt=100000,pause_seconds=.08):
     start=pd.Timestamp(start); end=pd.Timestamp(end)
     start=start.tz_localize("UTC") if start.tzinfo is None else start.tz_convert("UTC")
