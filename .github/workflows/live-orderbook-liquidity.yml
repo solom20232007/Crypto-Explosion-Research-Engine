@@ -1,19 +1,39 @@
-name: Live Order-Book Liquidity Snapshot
+name: Binance Small-Altcoin Candidate Screener and Deep Liquidity Monitor
 on:
+  schedule:
+    - cron: "*/15 * * * *"
   workflow_dispatch:
     inputs:
       max_symbols:
-        description: "Top symbols by 24h USDT volume"
-        required: true
-        default: "100"
+        description: "Maximum candidates to inspect deeply"
+        required: false
+        default: "60"
         type: string
       min_quote_volume:
-        description: "Minimum 24h quote volume in USDT"
-        required: true
-        default: "100000"
+        description: "Minimum 24h USDT quote volume"
+        required: false
+        default: "250000"
+        type: string
+      min_trades:
+        description: "Minimum number of 24h trades"
+        required: false
+        default: "500"
+        type: string
+      max_spread_bps:
+        description: "Maximum spread in basis points"
+        required: false
+        default: "75"
+        type: string
+      min_side_depth_usdt:
+        description: "Minimum bid and ask depth within 1 percent"
+        required: false
+        default: "2500"
         type: string
 permissions:
   contents: read
+concurrency:
+  group: binance-small-altcoin-liquidity-monitor
+  cancel-in-progress: false
 jobs:
   snapshot:
     runs-on: ubuntu-latest
@@ -35,10 +55,13 @@ jobs:
         run: python -m pytest -q
       - name: Collect live order-book snapshots
         env:
-          MAX_SYMBOLS: ${{ inputs.max_symbols }}
-          MIN_QUOTE_VOLUME: ${{ inputs.min_quote_volume }}
+          MAX_SYMBOLS: ${{ inputs.max_symbols || '60' }}
+          MIN_QUOTE_VOLUME: ${{ inputs.min_quote_volume || '250000' }}
+          MIN_TRADES: ${{ inputs.min_trades || '500' }}
+          MAX_SPREAD_BPS: ${{ inputs.max_spread_bps || '75' }}
+          MIN_SIDE_DEPTH_USDT: ${{ inputs.min_side_depth_usdt || '2500' }}
         run: python -m src.orderbook_liquidity
-      - name: Upload timestamped snapshot and summary
+      - name: Upload qualified candidates and timestamped order-book snapshots
         uses: actions/upload-artifact@v4
         with:
           name: live-orderbook-liquidity-${{ github.run_id }}
