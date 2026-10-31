@@ -229,7 +229,8 @@ def collect(hours: int = 2, max_pages: int = 50,
     all_rows: list[dict[str, Any]] = []
     counts: dict[str, int] = {}
     for chain, chain_id in DEFAULT_CHAINS.items():
-        rows = client.fetch_chain(chain, chain_id, hours=hours, max_pages=max_pages,\n                                  max_total_requests=max_total_requests)
+        rows = client.fetch_chain(chain, chain_id, hours=hours, max_pages=max_pages,
+                                  max_total_requests=max_total_requests)
         counts[chain] = len(rows)
         all_rows.extend(rows)
     observed = datetime.now(timezone.utc).isoformat()
@@ -246,11 +247,14 @@ def collect(hours: int = 2, max_pages: int = 50,
 def main() -> None:
     parser = argparse.ArgumentParser(description="Collect global EVM ERC-20 transfers from Routescan")
     parser.add_argument("--hours", type=int, default=int(os.getenv("ROUTESCAN_LOOKBACK_HOURS", "2")))
-    parser.add_argument("--max-pages", type=int, default=int(os.getenv("ROUTESCAN_MAX_PAGES", "50")))\n    parser.add_argument("--max-total-requests", type=int, default=int(os.getenv("ROUTESCAN_MAX_TOTAL_REQUESTS", str(DEFAULT_MAX_TOTAL_REQUESTS_PER_CHAIN))))
+    parser.add_argument("--max-pages", type=int, default=int(os.getenv("ROUTESCAN_MAX_PAGES", "50")))
+    parser.add_argument("--max-total-requests", type=int, default=int(os.getenv("ROUTESCAN_MAX_TOTAL_REQUESTS", str(DEFAULT_MAX_TOTAL_REQUESTS_PER_CHAIN))))
     args = parser.parse_args()
     if not 1 <= args.hours <= 24 or args.max_pages < 1:
         parser.error("--hours must be 1-24 and --max-pages must be positive")
-    if args.max_total_requests < 1:\n        parser.error("--max-total-requests must be positive")\n    collect(args.hours, args.max_pages, args.max_total_requests)
+    if args.max_total_requests < 1:
+        parser.error("--max-total-requests must be positive")
+    collect(args.hours, args.max_pages, args.max_total_requests)
 
 
 if __name__ == "__main__":
