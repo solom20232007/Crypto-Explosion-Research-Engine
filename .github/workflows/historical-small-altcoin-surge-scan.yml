@@ -1,4 +1,5 @@
 name: Historical Small-Altcoin Surge Scanner
+# Research-only full-history run; includes causal technical features and leakage-safe dataset evaluation.
 on:
   push:
     branches:
