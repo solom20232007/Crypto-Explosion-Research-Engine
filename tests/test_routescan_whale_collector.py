@@ -1,6 +1,7 @@
+import json
 from decimal import Decimal
 
-from src.routescan_whale_collector import RoutescanClient, normalize_routescan_transfer
+from src.routescan_whale_collector import RoutescanClient, normalize_routescan_transfer, upload_transfers
 
 
 def sample_transfer():
@@ -204,3 +205,33 @@ def test_routescan_persists_each_completed_interval_before_later_failure():
         raise AssertionError("Expected request-budget failure")
     assert len(completed) == 1
     assert completed[0]["tx_hash"] == "0xdef"
+
+
+def test_upload_transfers_serializes_decimal_values_without_float_loss(monkeypatch):
+    class FakeResponse:
+        ok = True
+
+    class FakeSession:
+        def __init__(self):
+            self.payload = None
+
+        def post(self, url, params, headers, data, timeout):
+            self.payload = json.loads(data)
+            return FakeResponse()
+
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SECRET_KEY", "test-secret")
+    session = FakeSession()
+    rows = [{
+        "chain": "ethereum",
+        "tx_hash": "0xabc",
+        "event_index": 1,
+        "amount_token": Decimal("0.000000000000000123456789"),
+        "amount_usd": Decimal("12345678901234567890.123456789"),
+        "source_payload": {"exact": Decimal("1.0000000000000000001")},
+    }]
+
+    assert upload_transfers(rows, session=session) == 1
+    assert session.payload[0]["amount_token"] == "0.000000000000000123456789"
+    assert session.payload[0]["amount_usd"] == "12345678901234567890.123456789"
+    assert session.payload[0]["source_payload"]["exact"] == "1.0000000000000000001"
