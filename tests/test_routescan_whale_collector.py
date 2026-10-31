@@ -93,3 +93,8 @@ def test_routescan_fails_instead_of_silently_truncating():
         assert "refusing to silently truncate" in str(exc)
     else:
         raise AssertionError("Expected explicit pagination-cap error")
+
+
+def test_routescan_cursor_extracts_token_from_next_url():
+    link = {"next": "/v2/network/mainnet/evm/1/erc20-transfers?limit=100&next=opaque-cursor"}
+    assert RoutescanClient._cursor_from_link(link) == "opaque-cursor"
