@@ -118,9 +118,10 @@ def run(input_dir: Path, out_dir: Path, pause=0.08, max_episodes=None):
         day = day.tz_localize("UTC") if day.tzinfo is None else day.tz_convert("UTC")
         start = int(day.timestamp() * 1000)
         try:
-            # 72h pre-event history plus 72h future bars for the longest label.
+            # 72h pre-event history plus 96h after UTC episode start, so a signal
+            # during the first 24h can still have a complete 72h outcome window.
             hourly = _get_hourly(str(episode["symbol"]), start - 72 * HOUR_MS,
-                                 start + 72 * HOUR_MS + 1, pause)
+                                 start + 96 * HOUR_MS + 1, pause)
             records.append(refine_episode(episode, hourly))
         except Exception as exc:
             failures.append({"symbol": episode["symbol"], "episode_start": episode["episode_start"],
