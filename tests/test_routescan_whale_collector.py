@@ -235,3 +235,73 @@ def test_upload_transfers_serializes_decimal_values_without_float_loss(monkeypat
     assert session.payload[0]["amount_token"] == "0.000000000000000123456789"
     assert session.payload[0]["amount_usd"] == "12345678901234567890.123456789"
     assert session.payload[0]["source_payload"]["exact"] == "1.0000000000000000001"
+
+
+
+def test_dense_interval_fetches_newest_half_before_older_half():
+    from datetime import datetime, timedelta, timezone
+
+    item = sample_transfer()
+
+    class FakeResponse:
+        status_code = 200
+        headers = {}
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class FakeSession:
+        def __init__(self):
+            self.params = []
+            self.calls = 0
+
+        def get(self, url, params, headers, timeout):
+            self.calls += 1
+            self.params.append(dict(params))
+            if self.calls == 1:
+                return FakeResponse({"items": [item], "link": {"next": "root-more"}})
+            return FakeResponse({"items": [dict(item, txHash=f"0x{self.calls}")], "link": {}})
+
+    session = FakeSession()
+    client = RoutescanClient(session=session, sleep=lambda _: None)
+    start = datetime(2026, 10, 31, 10, 0, tzinfo=timezone.utc)
+    end = start + timedelta(seconds=10)
+    client._fetch_interval("ethereum", 1, start, end, 1, [0], 3)
+
+    # First child request must cover the newer/right half, not the oldest half.
+    first_child_start = datetime.fromisoformat(session.params[1]["timestampFrom"].replace("Z", "+00:00"))
+    assert first_child_start > start + timedelta(seconds=4)
+
+
+def test_collect_continues_to_bsc_after_ethereum_budget_failure(monkeypatch):
+    import src.routescan_whale_collector as collector
+
+    attempted_chains = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def fetch_chain(self, chain, chain_id, **kwargs):
+            attempted_chains.append(chain)
+            if chain == "ethereum":
+                raise RuntimeError("request budget reached")
+            return []
+
+    monkeypatch.setattr(collector, "RoutescanClient", FakeClient)
+    monkeypatch.setattr(collector, "upload_transfers", lambda rows: len(rows))
+
+    try:
+        collector.collect(hours=1, max_pages=1, max_total_requests=1)
+    except RuntimeError as exc:
+        assert "ethereum" in str(exc)
+    else:
+        raise AssertionError("Expected incomplete collection error")
+
+    assert attempted_chains == ["ethereum", "bsc"]
