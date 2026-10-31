@@ -158,3 +158,48 @@ def test_routescan_enforces_total_request_budget():
         assert "safety cap of 1 requests per chain" in str(exc)
     else:
         raise AssertionError("Expected request budget protection")
+
+
+
+def test_routescan_persists_each_completed_interval_before_later_failure():
+    item = sample_transfer()
+    completed = []
+
+    class FakeResponse:
+        status_code = 200
+        headers = {}
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class FakeSession:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                # First half completes; recursive second half needs another
+                # page and hits the shared request budget.
+                return FakeResponse({"items": [item], "link": {}})
+            return FakeResponse({"items": [dict(item, txHash="0xdef")], "link": {"next": "more"}})
+
+    client = RoutescanClient(session=FakeSession(), sleep=lambda _: None)
+    from datetime import datetime, timedelta, timezone
+    start = datetime(2026, 10, 31, 10, 0, tzinfo=timezone.utc)
+    end = start + timedelta(seconds=10)
+    try:
+        client._fetch_interval("ethereum", 1, start, end, 1, [0], 2,
+                               on_interval=lambda rows: completed.extend(rows))
+    except RuntimeError as exc:
+        assert "safety cap of 2 requests per chain" in str(exc)
+    else:
+        raise AssertionError("Expected request-budget failure")
+    assert len(completed) == 1
+    assert completed[0]["tx_hash"] == "0xabc"
