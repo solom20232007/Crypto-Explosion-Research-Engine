@@ -35,6 +35,9 @@ on:
         required: true
         default: "250"
         type: string
+concurrency:
+  group: historical-small-altcoin-surge-scan-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
