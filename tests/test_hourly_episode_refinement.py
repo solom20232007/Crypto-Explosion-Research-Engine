@@ -31,9 +31,7 @@ class HourlyEpisodeRefinementTests(unittest.TestCase):
         rows = []
         start = pd.Timestamp("2026-01-10T00:00:00Z")
         for i in range(145):
-            if i == 12:
-                continue
-            rows.append({"open_time": int(start.timestamp() * 1000) + i * HOUR_MS,
+            rows.append({"open_time": int(start.timestamp() * 1000) + i * 2 * HOUR_MS,
                          "close": 100.0, "high": 120.0, "low": 99.0})
         result = refine_episode(
             {"symbol": "TESTUSDT", "episode_start": "2026-01-10T00:00:00Z"},
