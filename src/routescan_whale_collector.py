@@ -207,6 +207,13 @@ class RoutescanClient:
                                     on_interval=on_interval)
 
 
+def _json_default(value: Any) -> Any:
+    """Serialize exact Decimal values as strings accepted by PostgreSQL numeric columns."""
+    if isinstance(value, Decimal):
+        return str(value)
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
 def upload_transfers(rows: list[dict[str, Any]], session: requests.Session | None = None) -> int:
     if not rows:
         return 0
@@ -221,8 +228,12 @@ def upload_transfers(rows: list[dict[str, Any]], session: requests.Session | Non
     }
     endpoint = f"{url}/rest/v1/onchain_transfers"
     for start in range(0, len(rows), 500):
+        # requests' json= encoder cannot handle Decimal. Serialize explicitly
+        # so token amounts and USD values keep their exact decimal digits; Postgres
+        # numeric columns accept these JSON strings and cast them without float loss.
+        body = json.dumps(rows[start:start + 500], default=_json_default, allow_nan=False)
         response = http.post(endpoint, params={"on_conflict": "chain,tx_hash,event_index"},
-                             headers=headers, json=rows[start:start + 500], timeout=60)
+                             headers=headers, data=body, timeout=60)
         if not response.ok:
             raise RuntimeError(
                 f"Supabase onchain_transfers upload failed: HTTP {response.status_code}: {response.text[:1000]}"
