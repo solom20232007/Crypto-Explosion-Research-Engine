@@ -42,23 +42,47 @@ def fetch_klines(symbol,interval,start_ms,end_ms,pause=.08):
     f=pd.DataFrame(rows,columns=COLS).drop_duplicates("open_time").sort_values("open_time")
     for c in ("open_time","open","high","low","close","volume","quote_volume","trade_count"): f[c]=pd.to_numeric(f[c],errors="coerce")
     return f.dropna(subset=["open_time","close","high"])
-def detect_surge_events(daily,symbol,daily_high_pct=25,daily_close_pct=20,three_day_pct=40,seven_day_pct=75):
+def detect_surge_events(daily,symbol,early_1d_pct=10,confirmed_1d_pct=15,confirmed_2d_pct=25,confirmed_3d_pct=40):
+    """Detect early 10% moves and stronger 1d/2d/3d surge confirmations.
+
+    Daily high thresholds capture intraday excursions; close thresholds are
+    retained separately as stronger close-confirmed variants. The 2d/3d
+    windows use rolling daily highs and the close from 2/3 sessions earlier.
+    """
     if daily.empty: return pd.DataFrame()
     f=daily.copy().sort_values("open_time").reset_index(drop=True)
     for c in ("open","high","low","close","volume","quote_volume"): f[c]=pd.to_numeric(f[c],errors="coerce")
-    prev=f.close.shift(1); f["daily_close_change_pct"]=(f.close/prev-1)*100; f["daily_high_change_pct"]=(f.high/prev-1)*100
-    f["close_change_3d_pct"]=(f.close/f.close.shift(3)-1)*100; f["close_change_7d_pct"]=(f.close/f.close.shift(7)-1)*100
+    prev=f.close.shift(1)
+    f["daily_close_change_pct"]=(f.close/prev-1)*100
+    f["daily_high_change_pct"]=(f.high/prev-1)*100
+    f["two_day_high_change_pct"]=(f.high.rolling(2,min_periods=2).max()/f.close.shift(2)-1)*100
+    f["two_day_close_change_pct"]=(f.close/f.close.shift(2)-1)*100
+    f["three_day_high_change_pct"]=(f.high.rolling(3,min_periods=3).max()/f.close.shift(3)-1)*100
+    f["three_day_close_change_pct"]=(f.close/f.close.shift(3)-1)*100
     f["volume_change_1d_pct"]=(f.volume/f.volume.shift(1)-1)*100
-    tests={"daily_high":f.daily_high_change_pct>=daily_high_pct,"daily_close":f.daily_close_change_pct>=daily_close_pct,
-           "three_day_close":f.close_change_3d_pct>=three_day_pct,"seven_day_close":f.close_change_7d_pct>=seven_day_pct}
+    tests={
+      "early_surge_1d_high":f.daily_high_change_pct>=early_1d_pct,
+      "early_surge_1d_close":f.daily_close_change_pct>=early_1d_pct,
+      "confirmed_1d_high":f.daily_high_change_pct>=confirmed_1d_pct,
+      "confirmed_1d_close":f.daily_close_change_pct>=confirmed_1d_pct,
+      "confirmed_2d_high":f.two_day_high_change_pct>=confirmed_2d_pct,
+      "confirmed_2d_close":f.two_day_close_change_pct>=confirmed_2d_pct,
+      "confirmed_3d_high":f.three_day_high_change_pct>=confirmed_3d_pct,
+      "confirmed_3d_close":f.three_day_close_change_pct>=confirmed_3d_pct,
+    }
     mask=pd.Series(False,index=f.index)
-    for v in tests.values(): mask|=v
+    for v in tests.values(): mask|=v.fillna(False)
     r=f.loc[mask].copy()
     if r.empty: return pd.DataFrame()
-    r["symbol"]=symbol; r["event_date_utc"]=pd.to_datetime(r.open_time,unit="ms",utc=True).dt.strftime("%Y-%m-%d")
+    r["symbol"]=symbol
+    r["event_date_utc"]=pd.to_datetime(r.open_time,unit="ms",utc=True).dt.strftime("%Y-%m-%d")
     r["trigger_types"]=[",".join(k for k,v in tests.items() if bool(v.loc[i])) for i in r.index]
-    for c in ("daily_close_change_pct","daily_high_change_pct","close_change_3d_pct","close_change_7d_pct","volume_change_1d_pct"): r[c]=r[c].round(4)
-    return r[["symbol","event_date_utc","open_time","open","high","low","close","volume","quote_volume","daily_high_change_pct","daily_close_change_pct","close_change_3d_pct","close_change_7d_pct","volume_change_1d_pct","trigger_types"]].reset_index(drop=True)
+    numeric=("daily_close_change_pct","daily_high_change_pct","two_day_high_change_pct","two_day_close_change_pct",
+             "three_day_high_change_pct","three_day_close_change_pct","volume_change_1d_pct")
+    for c in numeric: r[c]=r[c].round(4)
+    return r[["symbol","event_date_utc","open_time","open","high","low","close","volume","quote_volume",
+      "daily_high_change_pct","daily_close_change_pct","two_day_high_change_pct","two_day_close_change_pct",
+      "three_day_high_change_pct","three_day_close_change_pct","volume_change_1d_pct","trigger_types"]].reset_index(drop=True)
 def summarize_context(hourly,symbol,date):
     if hourly.empty: return {"symbol":symbol,"event_date_utc":date,"hourly_rows":0}
     f=hourly.copy()
@@ -122,7 +146,7 @@ def run_scan(start,end,out_dir,max_symbols=None,max_events=250,min_quote_volume_
         except Exception as exc:
             failures.append({"symbol":sym,"error":f"{type(exc).__name__}: {exc}"}); print(json.dumps({"symbol":sym,"status":"error","error":str(exc)}))
         time.sleep(max(0,pause_seconds))
-    ev=pd.DataFrame(events,columns=["symbol","event_date_utc","open_time","open","high","low","close","volume","quote_volume","daily_high_change_pct","daily_close_change_pct","close_change_3d_pct","close_change_7d_pct","volume_change_1d_pct","trigger_types"])
+    ev=pd.DataFrame(events,columns=["symbol","event_date_utc","open_time","open","high","low","close","volume","quote_volume","daily_high_change_pct","daily_close_change_pct","two_day_high_change_pct","two_day_close_change_pct","three_day_high_change_pct","three_day_close_change_pct","volume_change_1d_pct","trigger_types"])
     if not ev.empty: ev=ev.sort_values(["daily_high_change_pct","daily_close_change_pct","close_change_3d_pct"],ascending=False)
     ep=out_dir/"surge_events.csv"; ev.to_csv(ep,index=False); daily_path=out_dir/"daily_candles.csv"; (pd.concat(daily_parts,ignore_index=True) if daily_parts else pd.DataFrame(columns=["symbol"]+COLS)).to_csv(daily_path,index=False); selected=ev.head(max(1,max_events)) if not ev.empty else ev
     hourly_parts=[]; contexts=[]; hfail=[]
@@ -137,7 +161,7 @@ def run_scan(start,end,out_dir,max_symbols=None,max_events=250,min_quote_volume_
     hp=out_dir/"surge_event_hourly_context.csv"; (pd.concat(hourly_parts,ignore_index=True) if hourly_parts else pd.DataFrame()).to_csv(hp,index=False)
     context=pd.DataFrame(contexts)
     if not context.empty:
-        cols=["symbol","event_date_utc","daily_high_change_pct","daily_close_change_pct","close_change_3d_pct","close_change_7d_pct","trigger_types"]
+        cols=["symbol","event_date_utc","daily_high_change_pct","daily_close_change_pct","two_day_high_change_pct","two_day_close_change_pct","three_day_high_change_pct","three_day_close_change_pct","trigger_types"]
         context=selected[cols].merge(context,on=["symbol","event_date_utc"],how="left")
     cp=out_dir/"surge_pre_event_context.csv"; context.to_csv(cp,index=False)
     summary={"requested_start_utc":start.isoformat(),"requested_end_exclusive_utc":end.isoformat(),
@@ -145,7 +169,7 @@ def run_scan(start,end,out_dir,max_symbols=None,max_events=250,min_quote_volume_
       "survivorship_bias_warning":"Current exchangeInfo omits delisted pairs; this first pass may miss historical winners that were later delisted.",
       "symbols_scanned":len(symbols),"symbols_with_errors":len(failures),"event_rows":len(ev),
       "selected_events_with_hourly_context":len(selected),"minimum_event_quote_volume_usdt":min_quote_volume_usdt,
-      "thresholds_pct":{"daily_high":25,"daily_close":20,"close_3d":40,"close_7d":75},
+      "thresholds_pct":{"early_surge_1d":10,"confirmed_1d":15,"confirmed_2d":25,"confirmed_3d":40},"threshold_method":"Daily high and close variants are recorded separately; 2d/3d use rolling daily highs or closes versus the close 2/3 sessions earlier.",
       "failed_symbols":failures,"hourly_context_failures":hfail,"daily_candle_rows":sum(len(x) for x in daily_parts),"outputs":[str(daily_path),str(ep),str(hp),str(cp)]}
     (out_dir/"surge_scan_summary.json").write_text(json.dumps(summary,indent=2),encoding="utf-8")
     print(json.dumps(summary,indent=2)); return summary
