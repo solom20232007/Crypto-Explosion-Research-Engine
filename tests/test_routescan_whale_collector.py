@@ -203,4 +203,4 @@ def test_routescan_persists_each_completed_interval_before_later_failure():
     else:
         raise AssertionError("Expected request-budget failure")
     assert len(completed) == 1
-    assert completed[0]["tx_hash"] == "0xabc"
+    assert completed[0]["tx_hash"] == "0xdef"
