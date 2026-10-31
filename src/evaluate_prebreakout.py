@@ -20,6 +20,13 @@ FEATURES = [
     "bollinger_position_20", "close_vs_prior_20d_high_pct",
     "quote_volume_median_7d", "quote_volume_median_30d", "quote_volume_zscore_30d",
     "trade_count_ratio_1d_7d", "taker_buy_quote_ratio",
+    "macd_histogram_pct", "macd_bullish_cross", "macd_bearish_cross",
+    "ema9_21_bullish_cross", "ema9_21_bearish_cross",
+    "bars_since_macd_bullish_cross", "bars_since_ema9_21_bullish_cross",
+    "rsi_cross_up_30", "rsi_cross_up_50", "rsi_cross_down_70",
+    "rsi_overbought_70", "rsi_oversold_30", "ema_bullish_alignment",
+    "price_above_ema50", "day_of_week_sin", "day_of_week_cos",
+    "month_sin", "month_cos", "days_since_first_seen",
 ]
 TARGETS = ["explosion_1d", "explosion_3d", "explosion_7d"]
 
