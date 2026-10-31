@@ -1,9 +1,24 @@
 {
   "version": "onchain-all-token-v2",
   "chains": [
-    {"chain": "ethereum", "family": "evm", "chain_id": 1, "enabled": true},
-    {"chain": "bsc", "family": "evm", "chain_id": 56, "enabled": true},
-    {"chain": "solana", "family": "solana", "cluster": "mainnet-beta", "enabled": true}
+    {
+      "chain": "ethereum",
+      "family": "evm",
+      "chain_id": 1,
+      "enabled": true
+    },
+    {
+      "chain": "bsc",
+      "family": "evm",
+      "chain_id": 56,
+      "enabled": true
+    },
+    {
+      "chain": "solana",
+      "family": "solana",
+      "cluster": "mainnet-beta",
+      "enabled": true
+    }
   ],
   "collection": {
     "mode": "research_only",
@@ -16,12 +31,64 @@
     "max_pages_per_chain": 100,
     "page_size": 1000,
     "schedule_minutes": 30,
-    "deduplicate_by": ["chain", "tx_hash", "event_index"],
+    "deduplicate_by": [
+      "chain",
+      "tx_hash",
+      "event_index"
+    ],
     "fail_on_page_cap": true
   },
   "providers": {
-    "evm_global_transfers": "bitquery_v2",
-    "solana_global_transfers": "bitquery_v2",
-    "wallet_history": "future_phase"
+    "primary_global_evm": "routescan_v2",
+    "primary_global_solana": "bitquery_v2 (paused until quota reset)",
+    "wallet_history": {
+      "evm": [
+        "ankr_getTokenTransfers",
+        "alchemy_getAssetTransfers",
+        "routescan_address_erc20_transfers"
+      ],
+      "solana": [
+        "helius_enhanced_transactions"
+      ]
+    }
+  },
+  "alternative_sources": {
+    "routescan_v2": {
+      "enabled": true,
+      "scope": "global_erc20_transfers",
+      "chains": [
+        "ethereum",
+        "bsc"
+      ],
+      "api_key_optional": true,
+      "free_keyless_limit_requests_per_second": 2,
+      "free_keyless_limit_calls_per_day": 10000,
+      "page_size": 100,
+      "schedule_target": "hourly_after_validation",
+      "usd_filter": "none"
+    },
+    "ankr": {
+      "enabled": false,
+      "scope": "wallet_address_history",
+      "required_secret": "ANKR_API_TOKEN",
+      "notes": "Address-scoped token transfers; Advanced API access and plan eligibility must be confirmed"
+    },
+    "alchemy": {
+      "enabled": false,
+      "scope": "wallet_or_token_contract_filtered_transfers",
+      "required_secret": "ALCHEMY_API_KEY",
+      "chains": [
+        "ethereum",
+        "base",
+        "polygon",
+        "arbitrum",
+        "optimism"
+      ]
+    },
+    "helius": {
+      "enabled": false,
+      "scope": "solana_wallet_address_history",
+      "required_secret": "HELIUS_API_KEY"
+    }
   }
 }
