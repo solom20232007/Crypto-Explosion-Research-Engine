@@ -40,11 +40,24 @@ class PrebreakoutDatasetTests(unittest.TestCase):
             "rsi_14", "ema9_vs_ema21_pct", "macd_pct", "atr_14_pct",
             "bollinger_width_20_pct", "close_vs_prior_20d_high_pct",
             "quote_volume_zscore_30d", "trade_count_ratio_1d_7d",
-            "taker_buy_quote_ratio",
+            "taker_buy_quote_ratio", "macd_histogram_pct", "macd_bullish_cross", "ema9_21_bullish_cross", "bars_since_macd_bullish_cross", "rsi_cross_up_50", "day_of_week_sin", "month_cos", "days_since_first_seen", "ema_bullish_alignment",
         }
         self.assertTrue(expected.issubset(set(data.columns)))
         finite_rsi = data["rsi_14"].dropna()
         self.assertTrue(((finite_rsi >= 0) & (finite_rsi <= 100)).all())
+
+    def test_crossover_flags_and_calendar_features_are_available(self):
+        frame = self.candles(90)
+        frame.loc[45:, "close"] = [10 + (i - 45) * 0.5 for i in range(45, 90)]
+        frame.loc[45:, "open"] = frame.loc[45:, "close"] - 0.1
+        frame.loc[45:, "high"] = frame.loc[45:, "close"] + 0.2
+        frame.loc[45:, "low"] = frame.loc[45:, "close"] - 0.2
+        data = build_dataset(frame)
+        for col in ("macd_bullish_cross", "macd_bearish_cross", "ema9_21_bullish_cross",
+                    "ema9_21_bearish_cross", "rsi_cross_up_30", "rsi_cross_up_50"):
+            self.assertTrue(set(data[col].dropna().unique()).issubset({0, 1}))
+        self.assertTrue((data["days_since_first_seen"] >= 0).all())
+        self.assertTrue(data["day_of_week_sin"].between(-1, 1).all())
 
     def test_requires_required_columns(self):
         with self.assertRaises(ValueError):
