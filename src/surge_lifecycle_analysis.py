@@ -30,6 +30,9 @@ def build_episodes(events: pd.DataFrame, candles: pd.DataFrame, cluster_gap_days
         trigger_types=("trigger_types", lambda s: ",".join(sorted({v for x in s.dropna() for v in str(x).split(",")})) if "trigger_types" in e else ""),
     ).reset_index().drop(columns=["_episode_no"])
     episodes["episode_id"] = episodes["symbol"] + "_" + episodes["episode_start"].dt.strftime("%Y%m%d")
+    episodes["episode_tier"] = episodes["trigger_types"].fillna("").map(
+        lambda x: "confirmed_explosion" if "confirmed_" in x else ("early_surge_only" if "early_surge_" in x else "unclassified")
+    )
 
     c = candles.copy()
     c["date"] = pd.to_datetime(c["open_time"], unit="ms", utc=True).dt.floor("D")
@@ -100,8 +103,9 @@ def summarize_lifecycle(episodes: pd.DataFrame):
     return {
         "episode_count": int(len(episodes)),
         "symbols": int(episodes.symbol.nunique()) if len(episodes) else 0,
+        "episode_tier_counts": episodes["episode_tier"].value_counts().to_dict() if "episode_tier" in episodes else {},
         "cluster_gap_days": 7,
-        "episode_definition": "Per symbol, trigger days separated by at most 7 calendar days are grouped; episode start is the first trigger day.",
+        "episode_definition": "Per symbol, trigger days separated by at most 7 calendar days are grouped; episode start is the first trigger day. Episodes are classified as confirmed_explosion if any 1d/2d/3d confirmation trigger occurred, otherwise early_surge_only if only 10% early triggers occurred.",
         "during_definition": "Fixed forward windows from first trigger day; max high and final close are measured against the prior day's close.",
         "after_peak_definition": "Peak is the highest daily high in the first 14 days from episode start; post-peak windows begin on the following day.",
         "metrics": stats,
