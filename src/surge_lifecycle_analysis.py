@@ -28,7 +28,7 @@ def build_episodes(events: pd.DataFrame, candles: pd.DataFrame, cluster_gap_days
         trigger_days=("event_date", "nunique"),
         raw_trigger_rows=("event_date", "size"),
         trigger_types=("trigger_types", lambda s: ",".join(sorted({v for x in s.dropna() for v in str(x).split(",")})) if "trigger_types" in e else ""),
-    ).reset_index(drop=True)
+    ).reset_index().drop(columns=["_episode_no"])
     episodes["episode_id"] = episodes["symbol"] + "_" + episodes["episode_start"].dt.strftime("%Y%m%d")
 
     c = candles.copy()
