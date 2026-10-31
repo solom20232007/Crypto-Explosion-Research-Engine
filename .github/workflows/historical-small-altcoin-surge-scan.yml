@@ -7,6 +7,8 @@ on:
     paths:
       - .github/workflows/historical-small-altcoin-surge-scan.yml
       - src/historical_surge_scanner.py
+      - src/hourly_episode_refinement.py
+      - tests/test_hourly_episode_refinement.py
       - src/surge_lifecycle_analysis.py
       - tests/test_surge_lifecycle_analysis.py
       - tests/test_historical_surge_scanner.py
