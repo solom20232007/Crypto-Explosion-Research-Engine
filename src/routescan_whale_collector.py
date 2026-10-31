@@ -1,0 +1,208 @@
+"""Routescan global ERC-20 transfer collector.
+
+Unlike wallet-history APIs, Routescan's token-level ERC-20 transfers endpoint
+can return transfers for a chain without specifying a wallet address. This
+collector is limited to Routescan-indexed EVM chains and ERC-20 events; it is
+not a replacement for Solana-wide indexing or native transfers.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import time
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
+from typing import Any
+
+import requests
+
+BASE_URL = "https://api.routescan.io/v2/network/mainnet/evm"
+PROVIDER = "routescan_v2"
+PAGE_SIZE = 100
+DEFAULT_CHAINS = {"ethereum": 1, "bsc": 56}
+
+
+def _utc(value: Any) -> str:
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
+def _decimal(value: Any) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def normalize_routescan_transfer(item: dict[str, Any], chain: str) -> dict[str, Any] | None:
+    tx_hash = item.get("txHash")
+    sender, receiver = item.get("from"), item.get("to")
+    token_address = item.get("tokenAddress")
+    if not tx_hash or not sender or not receiver or not token_address:
+        return None
+    decimals = item.get("tokenDecimals")
+    raw_amount = str(item.get("amount")) if item.get("amount") is not None else None
+    amount_token = None
+    if raw_amount is not None and decimals is not None:
+        try:
+            amount_token = Decimal(raw_amount) / (Decimal(10) ** int(decimals))
+        except (InvalidOperation, TypeError, ValueError):
+            amount_token = None
+    log_index = item.get("logIndex", 0)
+    return {
+        "chain": chain,
+        "tx_hash": str(tx_hash),
+        "event_index": int(log_index),
+        "block_number": int(item["blockNumber"]) if item.get("blockNumber") is not None else None,
+        "block_time_utc": _utc(item.get("timestamp") or item.get("createdAt")),
+        "token_address": str(token_address),
+        "token_symbol": item.get("tokenSymbol"),
+        "token_name": item.get("tokenName"),
+        "from_address": str(sender),
+        "to_address": str(receiver),
+        "amount_raw": raw_amount,
+        "token_decimals": int(decimals) if decimals is not None else None,
+        "amount_token": amount_token,
+        "amount_usd": _decimal(item.get("amountInUsd")),
+        "transfer_kind": "token",
+        "provider": PROVIDER,
+        "provider_event_id": str(log_index),
+        "is_finalized": True,
+        "source_payload": item,
+    }
+
+
+class RoutescanClient:
+    def __init__(self, api_key: str | None = None, session: requests.Session | None = None,
+                 sleep=time.sleep):
+        self.api_key = api_key
+        self.session = session or requests.Session()
+        self.sleep = sleep
+
+    def _get_page(self, chain_id: int, params: dict[str, Any]) -> dict[str, Any]:
+        query = dict(params)
+        if self.api_key:
+            query["apikey"] = self.api_key
+        url = f"{BASE_URL}/{chain_id}/erc20-transfers"
+        for attempt in range(6):
+            try:
+                response = self.session.get(url, params=query, headers=(
+                    {"apikey": self.api_key} if self.api_key else {}
+                ), timeout=(10, 45))
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+                if attempt == 5:
+                    raise
+                self.sleep(min(30, 2 ** attempt))
+                continue
+            if response.status_code == 429 or response.status_code >= 500:
+                if attempt == 5:
+                    response.raise_for_status()
+                retry = response.headers.get("Retry-After")
+                try:
+                    delay = max(1, min(60, int(retry))) if retry else min(30, 2 ** attempt)
+                except (TypeError, ValueError):
+                    delay = min(30, 2 ** attempt)
+                self.sleep(delay)
+                continue
+            response.raise_for_status()
+            payload = response.json()
+            if isinstance(payload, dict) and payload.get("error"):
+                raise RuntimeError(f"Routescan API error: {payload['error']}")
+            return payload
+        raise RuntimeError("Routescan request failed after retries")
+
+    def fetch_chain(self, chain: str, chain_id: int, hours: int = 2,
+                    max_pages: int = 100) -> list[dict[str, Any]]:
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(hours=hours)
+        params: dict[str, Any] = {
+            "timestampFrom": start.isoformat().replace("+00:00", "Z"),
+            "timestampTo": end.isoformat().replace("+00:00", "Z"),
+            "sort": "desc",
+            "limit": PAGE_SIZE,
+        }
+        rows: dict[tuple[str, str, int], dict[str, Any]] = {}
+        cursor = None
+        for page in range(max_pages):
+            if cursor:
+                params["next"] = cursor
+            payload = self._get_page(chain_id, params)
+            items = payload.get("items") or []
+            for item in items:
+                row = normalize_routescan_transfer(item, chain)
+                if row:
+                    key = (row["chain"], row["tx_hash"], row["event_index"])
+                    rows[key] = row
+            link = payload.get("link") or {}
+            next_cursor = link.get("next") or link.get("nextToken")
+            if not next_cursor or not items:
+                return list(rows.values())
+            if next_cursor == cursor:
+                raise RuntimeError(f"Routescan {chain}: pagination cursor did not advance")
+            cursor = next_cursor
+            # Free keyless plan is 2 requests/second; registered free is 5.
+            self.sleep(0.55 if not self.api_key else 0.22)
+        raise RuntimeError(
+            f"Routescan {chain}: reached MAX_PAGES={max_pages}; refusing to silently truncate."
+        )
+
+
+def upload_transfers(rows: list[dict[str, Any]], session: requests.Session | None = None) -> int:
+    if not rows:
+        return 0
+    url = os.environ["SUPABASE_URL"].rstrip("/")
+    key = os.environ["SUPABASE_SECRET_KEY"]
+    http = session or requests.Session()
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=ignore-duplicates,return=minimal",
+    }
+    endpoint = f"{url}/rest/v1/onchain_transfers"
+    for start in range(0, len(rows), 500):
+        response = http.post(endpoint, params={"on_conflict": "chain,tx_hash,event_index"},
+                             headers=headers, json=rows[start:start + 500], timeout=60)
+        if not response.ok:
+            raise RuntimeError(
+                f"Supabase onchain_transfers upload failed: HTTP {response.status_code}: {response.text[:1000]}"
+            )
+    return len(rows)
+
+
+def collect(hours: int = 2, max_pages: int = 100) -> dict[str, int]:
+    client = RoutescanClient(os.getenv("ROUTESCAN_API_KEY"))
+    all_rows: list[dict[str, Any]] = []
+    counts: dict[str, int] = {}
+    for chain, chain_id in DEFAULT_CHAINS.items():
+        rows = client.fetch_chain(chain, chain_id, hours=hours, max_pages=max_pages)
+        counts[chain] = len(rows)
+        all_rows.extend(rows)
+    observed = datetime.now(timezone.utc).isoformat()
+    for row in all_rows:
+        row["observed_at_utc"] = observed
+    counts["total"] = len(all_rows)
+    counts["uploaded_attempted"] = upload_transfers(all_rows)
+    result = {"provider": PROVIDER, "lookback_hours": hours, "scope": "global_erc20_transfers",
+              "usd_filter": "none", **counts}
+    print(json.dumps(result, sort_keys=True))
+    return counts
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Collect global EVM ERC-20 transfers from Routescan")
+    parser.add_argument("--hours", type=int, default=int(os.getenv("ROUTESCAN_LOOKBACK_HOURS", "2")))
+    parser.add_argument("--max-pages", type=int, default=int(os.getenv("ROUTESCAN_MAX_PAGES", "100")))
+    args = parser.parse_args()
+    if not 1 <= args.hours <= 24 or args.max_pages < 1:
+        parser.error("--hours must be 1-24 and --max-pages must be positive")
+    collect(args.hours, args.max_pages)
+
+
+if __name__ == "__main__":
+    main()
