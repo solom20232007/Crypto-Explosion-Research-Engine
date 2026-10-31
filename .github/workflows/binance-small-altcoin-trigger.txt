@@ -1,1 +1,3 @@
 Run staged Binance small-altcoin liquidity screening and order-book qualification on the research branch.
+
+Retry after fixing candidate screening tests.
