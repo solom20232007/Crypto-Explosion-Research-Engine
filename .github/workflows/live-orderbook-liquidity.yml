@@ -1,5 +1,10 @@
 name: Binance Small-Altcoin Candidate Screener and Deep Liquidity Monitor
 on:
+  push:
+    branches:
+      - research/binance-prebreakout-advisor-v1
+    paths:
+      - .github/workflows/binance-small-altcoin-trigger.txt
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:
