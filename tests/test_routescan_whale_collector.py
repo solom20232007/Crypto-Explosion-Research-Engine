@@ -185,10 +185,11 @@ def test_routescan_persists_each_completed_interval_before_later_failure():
         def get(self, *args, **kwargs):
             self.calls += 1
             if self.calls == 1:
-                # First half completes; recursive second half needs another
-                # page and hits the shared request budget.
-                return FakeResponse({"items": [item], "link": {}})
-            return FakeResponse({"items": [dict(item, txHash="0xdef")], "link": {"next": "more"}})
+                # Root interval reaches its page cap and must split.
+                return FakeResponse({"items": [item], "link": {"next": "root-more"}})
+            # First child interval completes; the next child cannot start
+            # because the shared request budget has been consumed.
+            return FakeResponse({"items": [dict(item, txHash="0xdef")], "link": {}})
 
     client = RoutescanClient(session=FakeSession(), sleep=lambda _: None)
     from datetime import datetime, timedelta, timezone
