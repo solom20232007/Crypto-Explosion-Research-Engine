@@ -51,7 +51,7 @@ def build_episodes(events: pd.DataFrame, candles: pd.DataFrame, cluster_gap_days
             loc = int(np.asarray(loc).flat[0])
         prev_close = float(bars.iloc[loc - 1].close) if loc > 0 else np.nan
         start_close = float(bars.iloc[loc].close)
-        forward = bars.iloc[loc:loc + 31]
+        forward = bars.iloc[loc:loc + 45]
         for horizon in (1, 3, 7, 14, 30):
             w = forward.iloc[:horizon]
             complete = len(w) == horizon
