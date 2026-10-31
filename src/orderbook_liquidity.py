@@ -235,8 +235,6 @@ def collect(max_symbols=60, min_quote_volume=250000, pause=0.08, output_dir=OUT,
     json_path.write_text(json.dumps({"summary": summary, "candidates": rows}, indent=2), encoding="utf-8")
     print(json.dumps({k: v for k, v in summary.items() if k not in {"errors", "rejected_depth_sample"}} |
                      {"errors_sample": errors[:10], "rejected_depth_sample": rejected_depth[:10]}, indent=2))
-    if not rows:
-        raise RuntimeError("No Binance small/mid-altcoin candidates passed volume, spread and two-sided depth gates")
     return rows, summary
 
 
