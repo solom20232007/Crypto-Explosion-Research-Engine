@@ -197,7 +197,7 @@ class RoutescanClient:
             rows[(row["chain"], row["tx_hash"], row["event_index"])] = row
         return list(rows.values())
 
-    def fetch_chain(self, chain: str, chain_id: int, hours: int = 2,
+    def fetch_chain(self, chain: str, chain_id: int, hours: int = 1,
                     max_pages: int = 50,
                     max_total_requests: int = DEFAULT_MAX_TOTAL_REQUESTS_PER_CHAIN,
                     on_interval=None) -> list[dict[str, Any]]:
