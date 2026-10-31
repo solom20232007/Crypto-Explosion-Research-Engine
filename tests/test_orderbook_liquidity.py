@@ -51,19 +51,6 @@ class OrderbookLiquidityTests(unittest.TestCase):
         self.assertIsNone(_spread_bps({"bidPrice": "0", "askPrice": "1"}))
 
 
+
 if __name__ == "__main__":
     unittest.main()
-
-        eligible = {"AAAUSDT", "BBBUSDT", "CCCUSDT"}
-        tickers = [
-            {"symbol": "AAAUSDT", "quoteVolume": "500000", "count": 900},
-            {"symbol": "BBBUSDT", "quoteVolume": "900000", "count": 120},
-            {"symbol": "CCCUSDT", "quoteVolume": "100000", "count": 2000},
-            {"symbol": "NOTELIGIBLEUSDT", "quoteVolume": "9000000", "count": 9000},
-        ]
-        rows = select_volume_candidates(tickers, eligible, min_quote_volume=250000, min_trades=500)
-        self.assertEqual([row["symbol"] for row in rows], ["AAAUSDT"])
-
-    def test_spread_screen_calculation(self):
-        self.assertAlmostEqual(_spread_bps({"bidPrice": "99.5", "askPrice": "100.5"}), 100.0)
-        self.assertIsNone(_spread_bps({"bidPrice": "0", "askPrice": "1"}))
