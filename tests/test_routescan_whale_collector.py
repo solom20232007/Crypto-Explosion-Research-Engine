@@ -40,6 +40,9 @@ def test_routescan_paginates_and_deduplicates():
     second = dict(sample_transfer(), txHash="0xdef", logIndex=9)
 
     class FakeResponse:
+        status_code = 200
+        headers = {}
+
         def __init__(self, payload):
             self.payload = payload
 
@@ -70,6 +73,9 @@ def test_routescan_fails_instead_of_silently_truncating():
     item = sample_transfer()
 
     class FakeResponse:
+        status_code = 200
+        headers = {}
+
         def raise_for_status(self):
             return None
 
