@@ -16,9 +16,14 @@ on:
         default: "2"
         type: string
       max_pages:
-        description: "Maximum pages per chain; fail rather than truncate"
+        description: "Maximum pages per time window; dense windows are split"
         required: false
-        default: "100"
+        default: "50"
+        type: string
+      max_total_requests:
+        description: "Safety cap on API calls per chain per run"
+        required: false
+        default: "200"
         type: string
 
 permissions:
@@ -53,5 +58,6 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           ROUTESCAN_LOOKBACK_HOURS: ${{ inputs.lookback_hours || '2' }}
-          ROUTESCAN_MAX_PAGES: ${{ inputs.max_pages || '100' }}
-        run: python -m src.routescan_whale_collector --hours "${ROUTESCAN_LOOKBACK_HOURS}" --max-pages "${ROUTESCAN_MAX_PAGES}"
+          ROUTESCAN_MAX_PAGES: ${{ inputs.max_pages || '50' }}
+          ROUTESCAN_MAX_TOTAL_REQUESTS: ${{ inputs.max_total_requests || '200' }}
+        run: python -m src.routescan_whale_collector --hours "${ROUTESCAN_LOOKBACK_HOURS}" --max-pages "${ROUTESCAN_MAX_PAGES}" --max-total-requests "${ROUTESCAN_MAX_TOTAL_REQUESTS}"
