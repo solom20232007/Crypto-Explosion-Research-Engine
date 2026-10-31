@@ -189,11 +189,13 @@ class RoutescanClient:
             )
         midpoint = start + (end - start) / 2
         overlap = min(1.0, duration / 100.0)
-        left = self._fetch_interval(chain, chain_id, start, midpoint + timedelta(seconds=overlap),
-                                    max_pages, budget, max_total_requests, depth + 1, on_interval)
+        # Process the newest half first. When a dense chain exhausts its
+        # request budget, checkpoints therefore preserve the freshest data.
         right = self._fetch_interval(chain, chain_id, midpoint - timedelta(seconds=overlap), end,
                                      max_pages, budget, max_total_requests, depth + 1, on_interval)
-        for row in left + right:
+        left = self._fetch_interval(chain, chain_id, start, midpoint + timedelta(seconds=overlap),
+                                    max_pages, budget, max_total_requests, depth + 1, on_interval)
+        for row in right + left:
             rows[(row["chain"], row["tx_hash"], row["event_index"])] = row
         return list(rows.values())
 
@@ -246,6 +248,7 @@ def collect(hours: int = 1, max_pages: int = 50,
     client = RoutescanClient(os.getenv("ROUTESCAN_API_KEY"))
     counts: dict[str, int] = {}
     uploaded_attempted = 0
+    errors: dict[str, str] = {}
     for chain, chain_id in DEFAULT_CHAINS.items():
 
         def persist_completed_interval(rows: list[dict[str, Any]]) -> None:
@@ -259,17 +262,28 @@ def collect(hours: int = 1, max_pages: int = 50,
                               "checkpoint_rows_attempted": inserted_attempt,
                               "uploaded_attempted_total": uploaded_attempted}, sort_keys=True), flush=True)
 
-        rows = client.fetch_chain(chain, chain_id, hours=hours, max_pages=max_pages,
-                                  max_total_requests=max_total_requests,
-                                  on_interval=persist_completed_interval)
-        # fetch_chain invokes the callback for every fully paginated interval.
-        counts[chain] = len(rows)
+        try:
+            rows = client.fetch_chain(chain, chain_id, hours=hours, max_pages=max_pages,
+                                      max_total_requests=max_total_requests,
+                                      on_interval=persist_completed_interval)
+            # fetch_chain invokes the callback for every fully paginated interval.
+            counts[chain] = len(rows)
+        except RuntimeError as exc:
+            # A dense chain must not prevent the next chain from using its own
+            # independent request budget. Completed checkpoints remain persisted.
+            errors[chain] = str(exc)
+            print(json.dumps({"provider": PROVIDER, "chain": chain,
+                              "collection_error": str(exc),
+                              "uploaded_attempted_total": uploaded_attempted}, sort_keys=True), flush=True)
+
     counts["total"] = sum(counts.values())
     counts["uploaded_attempted"] = uploaded_attempted
     result = {"provider": PROVIDER, "lookback_hours": hours, "scope": "global_erc20_transfers",
               "usd_filter": "none", "max_total_requests_per_chain": max_total_requests,
-              "upload_mode": "completed_intervals", **counts}
+              "upload_mode": "completed_intervals", "errors": errors, **counts}
     print(json.dumps(result, sort_keys=True))
+    if errors:
+        raise RuntimeError("Routescan collection incomplete: " + json.dumps(errors, sort_keys=True))
     return counts
 
 
