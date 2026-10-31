@@ -12,7 +12,7 @@ on:
       cases_per_tier:
         description: "Matched event cases per tier"
         required: true
-        default: "25"
+        default: "75"
         type: string
 permissions:
   contents: read
