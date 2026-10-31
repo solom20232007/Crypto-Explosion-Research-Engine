@@ -90,7 +90,7 @@ def test_routescan_fails_instead_of_silently_truncating():
     try:
         client.fetch_chain("ethereum", 1, hours=1, max_pages=1)
     except RuntimeError as exc:
-        assert "refusing to silently truncate" in str(exc)
+        assert "refusing truncation" in str(exc)
     else:
         raise AssertionError("Expected explicit pagination-cap error")
 
@@ -98,3 +98,37 @@ def test_routescan_fails_instead_of_silently_truncating():
 def test_routescan_cursor_extracts_token_from_next_url():
     link = {"next": "/v2/network/mainnet/evm/1/erc20-transfers?limit=100&next=opaque-cursor"}
     assert RoutescanClient._cursor_from_link(link) == "opaque-cursor"
+
+
+def test_routescan_splits_dense_windows_and_deduplicates_overlap():
+    first = sample_transfer()
+
+    class FakeResponse:
+        status_code = 200
+        headers = {}
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class FakeSession:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return FakeResponse({"items": [first], "link": {"next": "cursor"}})
+            return FakeResponse({"items": [first], "link": {}})
+
+    session = FakeSession()
+    client = RoutescanClient(session=session, sleep=lambda _: None)
+    rows = client.fetch_chain("ethereum", 1, hours=1, max_pages=1)
+    assert session.calls == 3
+    assert len(rows) == 1
+    assert rows[0]["tx_hash"] == "0xabc"
