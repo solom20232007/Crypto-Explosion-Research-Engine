@@ -1,6 +1,11 @@
 name: Routescan Global EVM Transfer Collector
 
 on:
+  push:
+    branches:
+      - research/binance-prebreakout-advisor-v1
+    paths:
+      - .github/workflows/routescan-manual-trigger.txt
   workflow_dispatch:
     inputs:
       lookback_hours:
