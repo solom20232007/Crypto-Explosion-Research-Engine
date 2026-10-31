@@ -21,6 +21,7 @@ import requests
 BASE_URL = "https://api.routescan.io/v2/network/mainnet/evm"
 PROVIDER = "routescan_v2"
 PAGE_SIZE = 100
+DEFAULT_MAX_TOTAL_REQUESTS_PER_CHAIN = 200
 DEFAULT_CHAINS = {"ethereum": 1, "bsc": 56}
 
 
@@ -134,7 +135,8 @@ class RoutescanClient:
         return str(next_link) if "://" not in str(next_link) and "?" not in str(next_link) else None
 
     def _fetch_interval(self, chain: str, chain_id: int, start: datetime, end: datetime,
-                        max_pages: int, depth: int = 0) -> list[dict[str, Any]]:
+                        max_pages: int, budget: list[int], max_total_requests: int,
+                        depth: int = 0) -> list[dict[str, Any]]:
         params: dict[str, Any] = {
             "timestampFrom": start.isoformat().replace("+00:00", "Z"),
             "timestampTo": end.isoformat().replace("+00:00", "Z"),
@@ -145,6 +147,12 @@ class RoutescanClient:
         cursor = None
         capped = True
         for _page in range(max_pages):
+            if budget[0] >= max_total_requests:
+                raise RuntimeError(
+                    f"Routescan {chain}: safety cap of {max_total_requests} requests per chain reached; "
+                    "collection stopped without uploading partial results."
+                )
+            budget[0] += 1
             if cursor:
                 params["next"] = cursor
             payload = self._get_page(chain_id, params)
@@ -177,18 +185,19 @@ class RoutescanClient:
         midpoint = start + (end - start) / 2
         overlap = min(1.0, duration / 100.0)
         left = self._fetch_interval(chain, chain_id, start, midpoint + timedelta(seconds=overlap),
-                                    max_pages, depth + 1)
+                                    max_pages, budget, max_total_requests, depth + 1)
         right = self._fetch_interval(chain, chain_id, midpoint - timedelta(seconds=overlap), end,
-                                     max_pages, depth + 1)
+                                     max_pages, budget, max_total_requests, depth + 1)
         for row in left + right:
             rows[(row["chain"], row["tx_hash"], row["event_index"])] = row
         return list(rows.values())
 
     def fetch_chain(self, chain: str, chain_id: int, hours: int = 2,
-                    max_pages: int = 100) -> list[dict[str, Any]]:
+                    max_pages: int = 50,
+                    max_total_requests: int = DEFAULT_MAX_TOTAL_REQUESTS_PER_CHAIN) -> list[dict[str, Any]]:
         end = datetime.now(timezone.utc)
         start = end - timedelta(hours=hours)
-        return self._fetch_interval(chain, chain_id, start, end, max_pages)
+        return self._fetch_interval(chain, chain_id, start, end, max_pages, [0], max_total_requests)
 
 
 def upload_transfers(rows: list[dict[str, Any]], session: requests.Session | None = None) -> int:
@@ -214,12 +223,13 @@ def upload_transfers(rows: list[dict[str, Any]], session: requests.Session | Non
     return len(rows)
 
 
-def collect(hours: int = 2, max_pages: int = 100) -> dict[str, int]:
+def collect(hours: int = 2, max_pages: int = 50,
+            max_total_requests: int = DEFAULT_MAX_TOTAL_REQUESTS_PER_CHAIN) -> dict[str, int]:
     client = RoutescanClient(os.getenv("ROUTESCAN_API_KEY"))
     all_rows: list[dict[str, Any]] = []
     counts: dict[str, int] = {}
     for chain, chain_id in DEFAULT_CHAINS.items():
-        rows = client.fetch_chain(chain, chain_id, hours=hours, max_pages=max_pages)
+        rows = client.fetch_chain(chain, chain_id, hours=hours, max_pages=max_pages,\n                                  max_total_requests=max_total_requests)
         counts[chain] = len(rows)
         all_rows.extend(rows)
     observed = datetime.now(timezone.utc).isoformat()
@@ -228,7 +238,7 @@ def collect(hours: int = 2, max_pages: int = 100) -> dict[str, int]:
     counts["total"] = len(all_rows)
     counts["uploaded_attempted"] = upload_transfers(all_rows)
     result = {"provider": PROVIDER, "lookback_hours": hours, "scope": "global_erc20_transfers",
-              "usd_filter": "none", **counts}
+              "usd_filter": "none", "max_total_requests_per_chain": max_total_requests, **counts}
     print(json.dumps(result, sort_keys=True))
     return counts
 
@@ -236,11 +246,11 @@ def collect(hours: int = 2, max_pages: int = 100) -> dict[str, int]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Collect global EVM ERC-20 transfers from Routescan")
     parser.add_argument("--hours", type=int, default=int(os.getenv("ROUTESCAN_LOOKBACK_HOURS", "2")))
-    parser.add_argument("--max-pages", type=int, default=int(os.getenv("ROUTESCAN_MAX_PAGES", "100")))
+    parser.add_argument("--max-pages", type=int, default=int(os.getenv("ROUTESCAN_MAX_PAGES", "50")))\n    parser.add_argument("--max-total-requests", type=int, default=int(os.getenv("ROUTESCAN_MAX_TOTAL_REQUESTS", str(DEFAULT_MAX_TOTAL_REQUESTS_PER_CHAIN))))
     args = parser.parse_args()
     if not 1 <= args.hours <= 24 or args.max_pages < 1:
         parser.error("--hours must be 1-24 and --max-pages must be positive")
-    collect(args.hours, args.max_pages)
+    if args.max_total_requests < 1:\n        parser.error("--max-total-requests must be positive")\n    collect(args.hours, args.max_pages, args.max_total_requests)
 
 
 if __name__ == "__main__":
