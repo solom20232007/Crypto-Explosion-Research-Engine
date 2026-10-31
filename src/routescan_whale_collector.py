@@ -210,7 +210,7 @@ class RoutescanClient:
 def _json_default(value: Any) -> Any:
     """Serialize exact Decimal values as strings accepted by PostgreSQL numeric columns."""
     if isinstance(value, Decimal):
-        return str(value)
+        return format(value, "f")
     raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
