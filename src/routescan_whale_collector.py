@@ -133,10 +133,8 @@ class RoutescanClient:
         # Some API versions return the opaque cursor directly.
         return str(next_link) if "://" not in str(next_link) and "?" not in str(next_link) else None
 
-    def fetch_chain(self, chain: str, chain_id: int, hours: int = 2,
-                    max_pages: int = 100) -> list[dict[str, Any]]:
-        end = datetime.now(timezone.utc)
-        start = end - timedelta(hours=hours)
+    def _fetch_interval(self, chain: str, chain_id: int, start: datetime, end: datetime,
+                        max_pages: int, depth: int = 0) -> list[dict[str, Any]]:
         params: dict[str, Any] = {
             "timestampFrom": start.isoformat().replace("+00:00", "Z"),
             "timestampTo": end.isoformat().replace("+00:00", "Z"),
@@ -145,7 +143,8 @@ class RoutescanClient:
         }
         rows: dict[tuple[str, str, int], dict[str, Any]] = {}
         cursor = None
-        for page in range(max_pages):
+        capped = True
+        for _page in range(max_pages):
             if cursor:
                 params["next"] = cursor
             payload = self._get_page(chain_id, params)
@@ -158,15 +157,38 @@ class RoutescanClient:
             link = payload.get("link") or {}
             next_cursor = self._cursor_from_link(link)
             if not next_cursor or not items:
-                return list(rows.values())
+                capped = False
+                break
             if next_cursor == cursor:
                 raise RuntimeError(f"Routescan {chain}: pagination cursor did not advance")
             cursor = next_cursor
             # Free keyless plan is 2 requests/second; registered free is 5.
             self.sleep(0.55 if not self.api_key else 0.22)
-        raise RuntimeError(
-            f"Routescan {chain}: reached MAX_PAGES={max_pages}; refusing to silently truncate."
-        )
+
+        if not capped:
+            return list(rows.values())
+
+        duration = (end - start).total_seconds()
+        if duration <= 1 or depth >= 20:
+            raise RuntimeError(
+                f"Routescan {chain}: interval {start.isoformat()}..{end.isoformat()} still "
+                f"exceeds {max_pages * PAGE_SIZE} rows at minimum split size; refusing truncation."
+            )
+        midpoint = start + (end - start) / 2
+        overlap = min(1.0, duration / 100.0)
+        left = self._fetch_interval(chain, chain_id, start, midpoint + timedelta(seconds=overlap),
+                                    max_pages, depth + 1)
+        right = self._fetch_interval(chain, chain_id, midpoint - timedelta(seconds=overlap), end,
+                                     max_pages, depth + 1)
+        for row in left + right:
+            rows[(row["chain"], row["tx_hash"], row["event_index"])] = row
+        return list(rows.values())
+
+    def fetch_chain(self, chain: str, chain_id: int, hours: int = 2,
+                    max_pages: int = 100) -> list[dict[str, Any]]:
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(hours=hours)
+        return self._fetch_interval(chain, chain_id, start, end, max_pages)
 
 
 def upload_transfers(rows: list[dict[str, Any]], session: requests.Session | None = None) -> int:
