@@ -42,8 +42,8 @@ jobs:
         with:
           name: historical-small-altcoin-surge-scan
           path: input-artifact
-          github-token: \${{ github.token }}
-          repository: \${{ github.repository }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
           run-id: 41226442142
       - name: Run dataset unit tests
         run: python -m pytest -q tests/test_true_prebreakout_dataset.py
@@ -52,7 +52,7 @@ jobs:
           python -m src.true_prebreakout_dataset \
             --input-dir input-artifact/surge_scan \
             --out-dir reports/true_prebreakout \
-            --cases-per-tier "\${{ inputs.cases_per_tier || '20' }}" \
+            --cases-per-tier "${{ inputs.cases_per_tier || '20' }}" \
             --pause-seconds 0.1
       - name: Upload research dataset
         uses: actions/upload-artifact@v4
