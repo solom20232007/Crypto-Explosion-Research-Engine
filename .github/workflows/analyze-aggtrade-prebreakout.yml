@@ -1,0 +1,46 @@
+name: Analyze Binance Pre-Breakout Study
+on:
+  push:
+    branches:
+      - research/binance-prebreakout-advisor-v1
+    paths:
+      - .github/workflows/analyze-aggtrade-prebreakout.yml
+      - src/analyze_aggtrade_prebreakout.py
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/binance-prebreakout-advisor-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install analysis dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Download completed aggTrades study artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: aggtrade-prebreakout-study
+          path: input-artifact
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 41333327935
+      - name: Run paired statistics and chronological stability analysis
+        run: |
+          python -m src.analyze_aggtrade_prebreakout \
+            --input-dir input-artifact \
+            --out-dir reports/aggtrade_analysis
+      - name: Upload analysis report
+        uses: actions/upload-artifact@v4
+        with:
+          name: aggtrade-prebreakout-analysis
+          path: reports/aggtrade_analysis/aggtrade_prebreakout_analysis.json
+          retention-days: 30
