@@ -8,6 +8,7 @@ on:
       - src/analyze_aggtrade_prebreakout.py
   workflow_dispatch:
 permissions:
+  actions: read
   contents: read
 jobs:
   analyze:
