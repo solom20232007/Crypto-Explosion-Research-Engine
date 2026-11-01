@@ -58,6 +58,10 @@ jobs:
         if: always()
         with:
           name: aggtrade-prebreakout-study
-          path: reports/aggtrade_study/
+          path: |
+            reports/aggtrade_study/aggtrade_case_manifest.csv
+            reports/aggtrade_study/aggtrade_prebreakout_features.csv
+            reports/aggtrade_study/aggtrade_matched_pair_deltas.csv
+            reports/aggtrade_study/aggtrade_prebreakout_summary.json
           if-no-files-found: warn
           retention-days: 30
