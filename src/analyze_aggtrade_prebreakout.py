@@ -156,7 +156,7 @@ def main():
         for col in feature_cols:
             tr = paired_test(train[col])
             if tr:
-                ranked.append({"feature": col, **tr})
+                ranked.append({"feature": col.removesuffix("_event_minus_control"), **tr})
         ranked.sort(key=lambda x: x["p_value"])
         stability = []
         for item in ranked[:10]:
