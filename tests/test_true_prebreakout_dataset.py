@@ -66,7 +66,7 @@ def test_fetch_future_klines_uses_binance_vision_monthly_archive(tmp_path):
     with zipfile.ZipFile(payload, "w") as archive:
         archive.writestr(
             "TESTUSDT-1h-2023-11.csv",
-            "\\n".join(",".join(map(str, row)) for row in rows),
+            "\n".join(",".join(map(str, row)) for row in rows),
         )
 
     class FakeResponse:
