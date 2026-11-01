@@ -5,8 +5,10 @@ Labels use future 1h klines and are stored separately from features.
 This is research, not proof of coordinated manipulation or a trading signal.
 """
 import argparse
+import io
 import json
 import time
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -82,34 +84,91 @@ def add_burst_features(trades, anchor_ms):
     }
 
 
-def fetch_future_klines(session, symbol, anchor_ms, cache_dir, pause=0.1):
+def _read_kline_archive(session, symbol, interval, period, cache_dir):
+    """Read one Binance Vision monthly or daily 1h-kline archive."""
+    if interval == "monthly":
+        suffix = period.strftime("%Y-%m")
+    else:
+        suffix = period.strftime("%Y-%m-%d")
     cache_dir.mkdir(parents=True, exist_ok=True)
-    path = cache_dir / f"{symbol}-{anchor_ms}-future72h.csv"
-    if path.exists():
-        return pd.read_csv(path)
-    params = {
-        "symbol": symbol,
-        "interval": "1h",
-        "startTime": int(anchor_ms - HOUR_MS),
-        "endTime": int(anchor_ms + 72 * HOUR_MS),
-        "limit": 100,
-    }
-    response = session.get(KLINES_URL, params=params, timeout=45)
-    response.raise_for_status()
-    raw = response.json()
+    cache_path = cache_dir / f"{symbol}-1h-{suffix}.zip"
+    if cache_path.exists():
+        payload = cache_path.read_bytes()
+    else:
+        url = (
+            f"https://data.binance.vision/data/spot/{interval}/klines/"
+            f"{symbol}/1h/{symbol}-1h-{suffix}.zip"
+        )
+        response = session.get(url, timeout=60)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        payload = response.content
+        cache_path.write_bytes(payload)
+
     cols = [
         "open_time", "open", "high", "low", "close", "volume",
         "close_time", "quote_volume", "trades", "taker_buy_base",
         "taker_buy_quote", "ignore",
     ]
-    frame = pd.DataFrame(raw, columns=cols)
-    for col in ("open_time", "open", "high", "low", "close", "quote_volume", "taker_buy_quote"):
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        csv_name = next(n for n in archive.namelist() if n.lower().endswith(".csv"))
+        with archive.open(csv_name) as handle:
+            frame = pd.read_csv(handle, header=None, names=cols)
+    for col in cols:
         frame[col] = pd.to_numeric(frame[col], errors="coerce")
-    frame.to_csv(path, index=False)
-    if pause:
-        time.sleep(pause)
-    return frame
+    return frame.dropna(subset=["open_time", "open", "high", "low", "close"])
 
+
+def fetch_future_klines(session, symbol, anchor_ms, cache_dir, pause=0.1):
+    """Load future 1h candles from Binance Vision archives, not api.binance.com.
+
+    GitHub-hosted runners can receive HTTP 451 from the Binance REST API.
+    Monthly public archives are preferred; daily archives are used when a
+    monthly archive is not published.
+    """
+    start_ms = int(anchor_ms - HOUR_MS)
+    end_ms = int(anchor_ms + 72 * HOUR_MS)
+    start = pd.to_datetime(start_ms, unit="ms", utc=True)
+    end = pd.to_datetime(end_ms, unit="ms", utc=True)
+    months = pd.period_range(start=start.to_period("M"), end=end.to_period("M"), freq="M")
+    frames = []
+    missing_months = []
+
+    for month in months:
+        frame = _read_kline_archive(
+            session, symbol, "monthly", month.start_time, cache_dir
+        )
+        if frame is None:
+            missing_months.append(month)
+        else:
+            frames.append(frame)
+        if pause:
+            time.sleep(pause)
+
+    # Daily archive fallback only for months whose monthly file is unavailable.
+    if missing_months:
+        days = pd.date_range(start=start.normalize(), end=end.normalize(), freq="D", tz="UTC")
+        needed = [day for day in days if day.to_period("M") in missing_months]
+        for day in needed:
+            frame = _read_kline_archive(session, symbol, "daily", day, cache_dir)
+            if frame is not None:
+                frames.append(frame)
+            if pause:
+                time.sleep(pause)
+
+    if not frames:
+        raise RuntimeError(f"No Binance Vision 1h kline archives found for {symbol}")
+    result = pd.concat(frames, ignore_index=True)
+    result = (
+        result.drop_duplicates("open_time", keep="last")
+        .sort_values("open_time")
+        .reset_index(drop=True)
+    )
+    result = result[(result.open_time >= start_ms) & (result.open_time <= end_ms)]
+    if result.empty:
+        raise RuntimeError(f"Binance Vision archives contained no requested candles for {symbol}")
+    return result
 
 def label_future(klines, anchor_ms):
     if klines.empty:
