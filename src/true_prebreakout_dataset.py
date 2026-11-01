@@ -262,20 +262,24 @@ def run(input_dir, out_dir, cases_per_tier=20, pause=0.1):
                 )
                 feats = extract_features(trades, anchor)
                 feats.update(add_burst_features(trades, anchor))
-                klines = fetch_future_klines(session, case["symbol"], anchor, kline_cache, pause)
-                labels = label_future(klines, anchor)
                 missing = sum(s == "missing_archive" for s in statuses)
                 parse_errors = sum(str(s).startswith("parse_error") for s in statuses)
                 row.update(feats)
-                row.update(labels)
                 row.update({
                     "archive_days_expected": expected,
                     "archive_days_missing": missing,
                     "archive_parse_errors": parse_errors,
                     "features_complete": bool(not trades.empty and missing == 0 and parse_errors == 0),
-                    "row_complete": bool(not trades.empty and missing == 0 and parse_errors == 0
-                                         and labels.get("label") != "incomplete"),
+                    "row_complete": False,
                 })
+                # Keep valid pre-anchor features even if the future-label source fails.
+                klines = fetch_future_klines(session, case["symbol"], anchor, kline_cache, pause)
+                labels = label_future(klines, anchor)
+                row.update(labels)
+                row["row_complete"] = bool(
+                    not trades.empty and missing == 0 and parse_errors == 0
+                    and labels.get("label") != "incomplete"
+                )
             except Exception as exc:
                 row.update({
                     "label": "incomplete",
