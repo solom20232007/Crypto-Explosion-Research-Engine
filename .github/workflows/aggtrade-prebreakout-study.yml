@@ -51,7 +51,7 @@ jobs:
           python -m src.aggtrade_prebreakout_study \
             --input-dir input-artifact/surge_scan \
             --out-dir reports/aggtrade_study \
-            --cases-per-tier "${{ inputs.cases_per_tier || '25' }}" \
+            --cases-per-tier "${{ inputs.cases_per_tier || '75' }}" \
             --pause-seconds 0.1
       - name: Upload aggTrades study results
         uses: actions/upload-artifact@v4
