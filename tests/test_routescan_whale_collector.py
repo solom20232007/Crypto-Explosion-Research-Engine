@@ -305,3 +305,50 @@ def test_collect_continues_to_bsc_after_ethereum_budget_failure(monkeypatch):
         raise AssertionError("Expected incomplete collection error")
 
     assert attempted_chains == ["ethereum", "bsc"]
+
+
+def test_routescan_api_key_is_sent_only_in_header():
+    class FakeResponse:
+        status_code = 200
+        headers = {}
+
+        def json(self):
+            return {"items": [], "link": {}}
+
+    class FakeSession:
+        def __init__(self):
+            self.params = None
+            self.headers = None
+
+        def get(self, url, params, headers, timeout):
+            self.params = dict(params)
+            self.headers = dict(headers)
+            return FakeResponse()
+
+    session = FakeSession()
+    client = RoutescanClient(api_key="test-routescan-key", session=session, sleep=lambda _: None)
+    client._get_page(56, {"limit": 100})
+
+    assert "apikey" not in session.params
+    assert session.headers == {"apikey": "test-routescan-key"}
+
+
+def test_routescan_http_400_reports_provider_response_body():
+    class FakeResponse:
+        status_code = 400
+        headers = {}
+        text = '{"message":"invalid request parameter"}'
+
+    class FakeSession:
+        def get(self, *args, **kwargs):
+            return FakeResponse()
+
+    client = RoutescanClient(session=FakeSession(), sleep=lambda _: None)
+    try:
+        client._get_page(56, {"limit": 100})
+    except RuntimeError as exc:
+        assert "HTTP 400" in str(exc)
+        assert "chain 56" in str(exc)
+        assert "invalid request parameter" in str(exc)
+    else:
+        raise AssertionError("Expected Routescan HTTP 400 to become a diagnostic RuntimeError")
