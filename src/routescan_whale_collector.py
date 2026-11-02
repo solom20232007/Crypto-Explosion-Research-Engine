@@ -87,23 +87,31 @@ class RoutescanClient:
         self.sleep = sleep
 
     def _get_page(self, chain_id: int, params: dict[str, Any]) -> dict[str, Any]:
+        # Routescan accepts the API key in the request header. Keep it out of
+        # query parameters so it is not duplicated in URLs or request logs.
         query = dict(params)
-        if self.api_key:
-            query["apikey"] = self.api_key
+        headers = {"apikey": self.api_key} if self.api_key else {}
         url = f"{BASE_URL}/{chain_id}/erc20-transfers"
         for attempt in range(6):
             try:
-                response = self.session.get(url, params=query, headers=(
-                    {"apikey": self.api_key} if self.api_key else {}
-                ), timeout=(10, 45))
-            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+                response = self.session.get(
+                    url, params=query, headers=headers, timeout=(10, 45)
+                )
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
                 if attempt == 5:
-                    raise
+                    raise RuntimeError(
+                        f"Routescan network failure for chain {chain_id} after 6 attempts: {exc}"
+                    ) from exc
                 self.sleep(min(30, 2 ** attempt))
                 continue
+
             if response.status_code == 429 or response.status_code >= 500:
                 if attempt == 5:
-                    response.raise_for_status()
+                    body = (getattr(response, "text", "") or "")[:1000]
+                    raise RuntimeError(
+                        f"Routescan HTTP {response.status_code} for chain {chain_id} "
+                        f"after 6 attempts: {body or 'empty response body'}"
+                    )
                 retry = response.headers.get("Retry-After")
                 try:
                     delay = max(1, min(60, int(retry))) if retry else min(30, 2 ** attempt)
@@ -111,12 +119,26 @@ class RoutescanClient:
                     delay = min(30, 2 ** attempt)
                 self.sleep(delay)
                 continue
-            response.raise_for_status()
-            payload = response.json()
+
+            if response.status_code >= 400:
+                body = (getattr(response, "text", "") or "")[:1000]
+                raise RuntimeError(
+                    f"Routescan HTTP {response.status_code} for chain {chain_id}: "
+                    f"{body or 'empty response body'}"
+                )
+
+            try:
+                payload = response.json()
+            except ValueError as exc:
+                body = (getattr(response, "text", "") or "")[:1000]
+                raise RuntimeError(
+                    f"Routescan returned invalid JSON for chain {chain_id}: "
+                    f"{body or str(exc)}"
+                ) from exc
             if isinstance(payload, dict) and payload.get("error"):
-                raise RuntimeError(f"Routescan API error: {payload['error']}")
+                raise RuntimeError(f"Routescan API error for chain {chain_id}: {payload['error']}")
             return payload
-        raise RuntimeError("Routescan request failed after retries")
+        raise RuntimeError(f"Routescan request failed for chain {chain_id} after retries")
 
     @staticmethod
     def _cursor_from_link(link: dict[str, Any]) -> str | None:
