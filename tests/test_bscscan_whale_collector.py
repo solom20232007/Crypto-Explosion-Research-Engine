@@ -101,7 +101,7 @@ def test_bscscan_splits_full_1000_result_interval_and_checkpoints_leaves():
 
     checkpoints = []
     client = BscScanClient("test-key", session=Session(), sleep=lambda _: None)
-    rows = client._fetch_block_range(100, 103, on_interval=lambda batch: checkpoints.extend(batch))
+    rows = client._fetch_block_range(100, 101, on_interval=lambda batch: checkpoints.extend(batch))
     assert client.request_count == 3
     assert len(rows) == 1
     assert len(checkpoints) == 2
