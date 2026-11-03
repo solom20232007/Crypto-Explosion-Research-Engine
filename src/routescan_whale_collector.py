@@ -22,7 +22,7 @@ BASE_URL = "https://api.routescan.io/v2/network/mainnet/evm"
 PROVIDER = "routescan_v2"
 PAGE_SIZE = 100
 DEFAULT_MAX_TOTAL_REQUESTS_PER_CHAIN = 300
-DEFAULT_CHAINS = {"ethereum": 1, "bsc": 56}
+DEFAULT_CHAINS = {"ethereum": 1}
 
 
 def _utc(value: Any) -> str:
