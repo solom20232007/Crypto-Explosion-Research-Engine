@@ -1,0 +1,67 @@
+name: Binance aggTrades Pre-Breakout Study
+on:
+  push:
+    branches:
+      - research/binance-prebreakout-advisor-v1
+    paths:
+      - .github/workflows/aggtrade-prebreakout-study.yml
+      - src/aggtrade_prebreakout_study.py
+      - tests/test_aggtrade_prebreakout_study.py
+  workflow_dispatch:
+    inputs:
+      cases_per_tier:
+        description: "Matched event cases per tier"
+        required: true
+        default: "75"
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: aggtrade-prebreakout-study
+  cancel-in-progress: true
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/binance-prebreakout-advisor-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+      - name: Download completed historical episode artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: historical-small-altcoin-surge-scan
+          path: input-artifact
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 41226442142
+      - name: Run aggTrades unit tests
+        run: python -m pytest -q tests/test_aggtrade_prebreakout_study.py
+      - name: Build matched event/control aggTrades dataset
+        run: |
+          python -m src.aggtrade_prebreakout_study \
+            --input-dir input-artifact/surge_scan \
+            --out-dir reports/aggtrade_study \
+            --cases-per-tier "${{ inputs.cases_per_tier || '75' }}" \
+            --pause-seconds 0.1
+      - name: Upload aggTrades study results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aggtrade-prebreakout-study
+          path: |
+            reports/aggtrade_study/aggtrade_case_manifest.csv
+            reports/aggtrade_study/aggtrade_prebreakout_features.csv
+            reports/aggtrade_study/aggtrade_matched_pair_deltas.csv
+            reports/aggtrade_study/aggtrade_prebreakout_summary.json
+          if-no-files-found: warn
+          retention-days: 30

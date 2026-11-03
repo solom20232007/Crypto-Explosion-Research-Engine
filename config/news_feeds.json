@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "policy": "Prefer official project/exchange sources for direct announcements; use established independent publishers for broad coverage. Tiers describe source class, not truth guarantees.",
+  "sources": [
+    {"name":"CoinDesk","url":"https://www.coindesk.com/arc/outboundfeeds/rss/","tier":"established_media","type":"independent_media","enabled":true},
+    {"name":"Cointelegraph","url":"https://cointelegraph.com/rss","tier":"established_media","type":"independent_media","enabled":true},
+    {"name":"The Block","url":"https://www.theblock.co/rss.xml","tier":"established_media","type":"independent_media","enabled":true},
+    {"name":"Decrypt","url":"https://decrypt.co/feed","tier":"established_media","type":"independent_media","enabled":true},
+    {"name":"CryptoSlate","url":"https://cryptoslate.com/feed/","tier":"secondary_media","type":"independent_media","enabled":true},
+    {"name":"Coinbase Blog","url":"https://www.coinbase.com/blog/rss.xml","tier":"official_primary","type":"exchange_official","enabled":true},
+    {"name":"Ethereum Foundation Blog","url":"https://blog.ethereum.org/feed.xml","tier":"official_primary","type":"project_official","enabled":true}
+  ]
+}

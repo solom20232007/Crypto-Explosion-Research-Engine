@@ -5,6 +5,8 @@ import json
 import numpy as np
 import pandas as pd
 
+from src.technical_indicators import add_technical_indicators
+
 RAW_DIR = Path("data/raw")
 REPORT_DIR = Path("reports")
 FEATURES_PATH = Path("data/features.csv")
@@ -47,11 +49,24 @@ def build_features(df, symbol):
     df = df.copy()
 
     # Normalize timestamps and numeric columns.
-    df["open_time"] = pd.to_datetime(
-        df["open_time"],
-        utc=True,
-        errors="coerce",
-    )
+    raw_open_time = df["open_time"]
+    # Preserve already-parsed datetime columns. Converting datetimes to integers
+    # first produces nanoseconds, which must never be reinterpreted as milliseconds.
+    if pd.api.types.is_datetime64_any_dtype(raw_open_time.dtype):
+        df["open_time"] = pd.to_datetime(
+            raw_open_time, utc=True, errors="coerce"
+        )
+    else:
+        numeric_open_time = pd.to_numeric(raw_open_time, errors="coerce")
+        if numeric_open_time.notna().mean() >= 0.95:
+            # Binance REST klines use Unix epoch milliseconds.
+            df["open_time"] = pd.to_datetime(
+                numeric_open_time, unit="ms", utc=True, errors="coerce"
+            )
+        else:
+            df["open_time"] = pd.to_datetime(
+                raw_open_time, utc=True, errors="coerce"
+            )
 
     df = (
         df.dropna(subset=["open_time"])
@@ -170,6 +185,10 @@ def build_features(df, symbol):
     # Recent volatility.
     out["volatility_24h"] = out["ret_1h"].rolling(24).std()
 
+    # Broad causal technical indicators and current-state breakout phase labels.
+    # This runs after timestamp sorting/cleaning, so output rows remain aligned.
+    out = pd.concat([out, add_technical_indicators(df)], axis=1)
+
     # Historical event:
     # Did the closing price rise at least 15% over the preceding 24 bars?
     out["historical_24h_return"] = c / c.shift(24) - 1
@@ -215,7 +234,7 @@ def analyze_symbols(symbols=None):
         if path.exists():
             path.unlink()
 
-    files = sorted(RAW_DIR.glob("*_*.csv"))
+    files = sorted(RAW_DIR.glob("*_1h.csv"))
 
     if symbols:
         allowed = set(symbols)
@@ -322,6 +341,11 @@ def analyze_symbols(symbols=None):
             "Any high in the next 24 bars reaches >= 15% "
             "above the current close"
         ),
+        "technical_feature_columns": int(len(result.columns)),
+        "breakout_phase_rows": {
+            str(phase): int(count)
+            for phase, count in result["breakout_phase"].value_counts(dropna=False).items()
+        },
         "failed_files": failed_files,
         "note": (
             "Research output only; not trading signals. "

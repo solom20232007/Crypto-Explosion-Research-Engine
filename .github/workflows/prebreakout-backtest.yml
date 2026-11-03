@@ -1,0 +1,86 @@
+name: Chronological Pre-breakout Backtest (BTC ETH SOL)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research/binance-prebreakout-advisor-v1
+    paths:
+      - "src/backtest.py"
+      - "tests/test_backtest.py"
+      - ".github/workflows/prebreakout-backtest.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+    steps:
+      - name: Checkout research branch
+        uses: actions/checkout@v4
+        with:
+          ref: research/binance-prebreakout-advisor-v1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Load pilot candles from Supabase (read-only)
+        run: |
+          test -n "$SUPABASE_URL"
+          test -n "$SUPABASE_SECRET_KEY"
+          python main.py load-supabase --symbols BTCUSDT ETHUSDT SOLUSDT --timeframe 1h
+
+      - name: Rebuild causal features and future target
+        run: python main.py analyze --symbols BTCUSDT ETHUSDT SOLUSDT
+
+      - name: Evaluate fixed heuristics on chronological holdout
+        run: python -m src.backtest
+
+      - name: Validate backtest outputs
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import pandas as pd
+          summary = json.loads(Path("reports/backtest_summary.json").read_text(encoding="utf-8"))
+          metrics = pd.read_csv("reports/backtest_metrics.csv")
+          assert len(summary["splits"]) == 3, "Expected a split for each pilot symbol"
+          assert summary["holdout_rows"] > 0, "Empty holdout"
+          assert set(metrics["symbol"]) == {"BTCUSDT", "ETHUSDT", "SOLUSDT", "ALL"}
+          assert metrics["signals"].notna().all()
+          print(json.dumps({
+              "holdout_rows": summary["holdout_rows"],
+              "holdout_positive_rows": summary["holdout_positive_rows"],
+              "holdout_positive_rate": summary["holdout_positive_rate"],
+              "metrics": summary["results"],
+          }, indent=2))
+          PY
+
+      - name: Upload backtest report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prebreakout-chronological-backtest
+          path: |
+            reports/backtest_summary.json
+            reports/backtest_metrics.csv
+            reports/analysis_summary.json
+          if-no-files-found: warn
+          retention-days: 14

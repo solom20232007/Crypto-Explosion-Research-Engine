@@ -1,0 +1,75 @@
+name: Binance Small-Altcoin Candidate Screener and Deep Liquidity Monitor
+on:
+  push:
+    branches:
+      - research/binance-prebreakout-advisor-v1
+    paths:
+      - .github/workflows/binance-small-altcoin-trigger.txt
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      max_symbols:
+        description: "Maximum candidates to inspect deeply"
+        required: false
+        default: "60"
+        type: string
+      min_quote_volume:
+        description: "Minimum 24h USDT quote volume"
+        required: false
+        default: "250000"
+        type: string
+      min_trades:
+        description: "Minimum number of 24h trades"
+        required: false
+        default: "500"
+        type: string
+      max_spread_bps:
+        description: "Maximum spread in basis points"
+        required: false
+        default: "75"
+        type: string
+      min_side_depth_usdt:
+        description: "Minimum bid and ask depth within 1 percent"
+        required: false
+        default: "2500"
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: binance-small-altcoin-liquidity-monitor
+  cancel-in-progress: false
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/binance-prebreakout-advisor-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+      - name: Run research tests
+        run: python -m pytest -q
+      - name: Collect live order-book snapshots
+        env:
+          MAX_SYMBOLS: ${{ inputs.max_symbols || '60' }}
+          MIN_QUOTE_VOLUME: ${{ inputs.min_quote_volume || '250000' }}
+          MIN_TRADES: ${{ inputs.min_trades || '500' }}
+          MAX_SPREAD_BPS: ${{ inputs.max_spread_bps || '75' }}
+          MIN_SIDE_DEPTH_USDT: ${{ inputs.min_side_depth_usdt || '2500' }}
+        run: python -m src.orderbook_liquidity
+      - name: Upload qualified candidates and timestamped order-book snapshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-orderbook-liquidity-${{ github.run_id }}
+          path: reports/orderbook_liquidity/
+          if-no-files-found: error
+          retention-days: 30
