@@ -53,7 +53,7 @@ jobs:
       - name: Collect Ethereum and BSC global token transfers
         env:
           ROUTESCAN_API_KEY: ${{ secrets.ROUTESCAN_API_KEY }}
-          BSC_SCAN_API_KEY: ${{ secrets.BSC_SCAN_API_KEY }}
+          BSC_RPC_URL: ${{ secrets.BSC_RPC_URL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           ROUTESCAN_LOOKBACK_HOURS: ${{ inputs.lookback_hours || '1' }}
@@ -65,7 +65,7 @@ jobs:
           python -m src.routescan_whale_collector --hours "${ROUTESCAN_LOOKBACK_HOURS}" --max-pages "${ROUTESCAN_MAX_PAGES}" --max-total-requests "${ROUTESCAN_MAX_TOTAL_REQUESTS}"
           ethereum_status=$?
           echo "=== BSC / Etherscan V2 ==="
-          python -m src.bscscan_whale_collector --hours "${ROUTESCAN_LOOKBACK_HOURS}" --max-total-requests "${ROUTESCAN_MAX_TOTAL_REQUESTS}"
+          python -m src.bsc_rpc_whale_collector --hours "${ROUTESCAN_LOOKBACK_HOURS}" --max-total-requests "${ROUTESCAN_MAX_TOTAL_REQUESTS}"
           bsc_status=$?
           if [ "$ethereum_status" -ne 0 ] || [ "$bsc_status" -ne 0 ]; then
             echo "Collector summary: ethereum_exit=$ethereum_status bsc_exit=$bsc_status"
