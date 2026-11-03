@@ -139,6 +139,7 @@ class BscScanClient:
                 if "no records found" in str(result).lower() or "no transactions found" in str(result).lower():
                     return []
                 raise RuntimeError(f"BscScan API error: {message}: {str(result)[:1000]}")
+            self.sleep(0.22)  # Respect the documented free-tier ceiling of 5 requests/second.
             return result
         raise RuntimeError("BscScan request failed after retries")
 
