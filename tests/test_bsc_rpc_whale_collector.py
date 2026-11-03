@@ -93,6 +93,11 @@ def test_splits_dense_block_ranges_and_checkpoints_completed_leaves():
 
     class Session:
         def post(self, url, json, timeout):
+            if isinstance(json, list):
+                return Response([
+                    {"jsonrpc": "2.0", "id": item["id"], "result": {"timestamp": "0x10"}}
+                    for item in json
+                ])
             params = json["params"][0]
             start, end = int(params["fromBlock"], 16), int(params["toBlock"], 16)
             if start == end:
