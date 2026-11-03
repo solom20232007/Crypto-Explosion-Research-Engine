@@ -1,4 +1,4 @@
-name: Routescan Global EVM Transfer Collector
+name: Global EVM Transfer Collectors (Ethereum + BSC)
 
 on:
   push:
@@ -14,27 +14,27 @@ on:
         default: "1"
         type: string
       max_pages:
-        description: "Maximum pages per time window; dense windows are split"
+        description: "Maximum Routescan pages per time window; dense windows are split"
         required: false
         default: "50"
         type: string
       max_total_requests:
         description: "Safety cap on API calls per chain per run"
         required: false
-        default: "300"
+        default: "1000"
         type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: routescan-whale-collector
+  group: global-evm-transfer-collectors
   cancel-in-progress: false
 
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -50,12 +50,24 @@ jobs:
           pip install pytest
       - name: Run test suite
         run: python -m pytest -q
-      - name: Collect global EVM ERC-20 transfers from Routescan
+      - name: Collect Ethereum and BSC global token transfers
         env:
           ROUTESCAN_API_KEY: ${{ secrets.ROUTESCAN_API_KEY }}
+          BSC_SCAN_API_KEY: ${{ secrets.BSC_SCAN_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           ROUTESCAN_LOOKBACK_HOURS: ${{ inputs.lookback_hours || '1' }}
           ROUTESCAN_MAX_PAGES: ${{ inputs.max_pages || '50' }}
-          ROUTESCAN_MAX_TOTAL_REQUESTS: ${{ inputs.max_total_requests || '300' }}
-        run: python -m src.routescan_whale_collector --hours "${ROUTESCAN_LOOKBACK_HOURS}" --max-pages "${ROUTESCAN_MAX_PAGES}" --max-total-requests "${ROUTESCAN_MAX_TOTAL_REQUESTS}"
+          ROUTESCAN_MAX_TOTAL_REQUESTS: ${{ inputs.max_total_requests || '1000' }}
+        run: |
+          set +e
+          echo "=== Ethereum / Routescan ==="
+          python -m src.routescan_whale_collector --hours "${ROUTESCAN_LOOKBACK_HOURS}" --max-pages "${ROUTESCAN_MAX_PAGES}" --max-total-requests "${ROUTESCAN_MAX_TOTAL_REQUESTS}"
+          ethereum_status=$?
+          echo "=== BSC / Etherscan V2 ==="
+          python -m src.bscscan_whale_collector --hours "${ROUTESCAN_LOOKBACK_HOURS}" --max-total-requests "${ROUTESCAN_MAX_TOTAL_REQUESTS}"
+          bsc_status=$?
+          if [ "$ethereum_status" -ne 0 ] || [ "$bsc_status" -ne 0 ]; then
+            echo "Collector summary: ethereum_exit=$ethereum_status bsc_exit=$bsc_status"
+            exit 1
+          fi
