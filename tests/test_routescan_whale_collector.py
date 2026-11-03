@@ -279,7 +279,7 @@ def test_dense_interval_fetches_newest_half_before_older_half():
     assert first_child_start > start + timedelta(seconds=4)
 
 
-def test_collect_continues_to_bsc_after_ethereum_budget_failure(monkeypatch):
+def test_routescan_collects_only_ethereum_after_bsc_split(monkeypatch):
     import src.routescan_whale_collector as collector
 
     attempted_chains = []
@@ -304,7 +304,7 @@ def test_collect_continues_to_bsc_after_ethereum_budget_failure(monkeypatch):
     else:
         raise AssertionError("Expected incomplete collection error")
 
-    assert attempted_chains == ["ethereum", "bsc"]
+    assert attempted_chains == ["ethereum"]
 
 
 def test_routescan_api_key_is_sent_only_in_header():
