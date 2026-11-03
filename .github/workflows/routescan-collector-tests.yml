@@ -6,9 +6,9 @@ on:
       - research/binance-prebreakout-advisor-v1
     paths:
       - src/routescan_whale_collector.py
-      - src/bscscan_whale_collector.py
+      - src/bsc_rpc_whale_collector.py
       - tests/test_routescan_whale_collector.py
-      - tests/test_bscscan_whale_collector.py
+      - tests/test_bsc_rpc_whale_collector.py
       - .github/workflows/routescan-whale-collector.yml
       - .github/workflows/routescan-collector-tests.yml
   workflow_dispatch:
