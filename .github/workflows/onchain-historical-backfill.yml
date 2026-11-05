@@ -1,6 +1,11 @@
 name: Historical On-chain Transfer Backfill
 
 on:
+  push:
+    branches:
+      - research/binance-prebreakout-advisor-v1
+    paths:
+      - .github/workflows/onchain-backfill-trigger.txt
   schedule:
     - cron: "17 */6 * * *"
   workflow_dispatch:
