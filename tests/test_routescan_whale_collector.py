@@ -378,7 +378,7 @@ def test_routescan_fetch_chain_uses_contiguous_newest_first_five_minute_slices(m
     client = RecordingClient(sleep=lambda _: None)
     client.fetch_chain("ethereum", 1, hours=1, max_pages=50, max_total_requests=100)
 
-    assert len(intervals) == 12
+    assert len(intervals) == 60
     assert all(intervals[i][0] == intervals[i + 1][1] for i in range(len(intervals) - 1))
     assert all(intervals[i][1] > intervals[i][0] for i in range(len(intervals)))
     assert intervals[0][1] > intervals[-1][1]
