@@ -176,7 +176,8 @@ class BscRpcClient:
         }
 
     def _fetch_block_range(self, start_block: int, end_block: int, on_interval=None,
-                           depth: int = 0) -> list[dict[str, Any]]:
+                           depth: int = 0, on_interval_complete=None,
+                           newest_first: bool = True) -> list[dict[str, Any]]:
         if end_block < start_block:
             return []
         try:
@@ -271,6 +272,8 @@ class BscRpcClient:
             completed = list(unique.values())
             if on_interval and completed:
                 on_interval(completed)
+            if on_interval_complete:
+                on_interval_complete(start_block, end_block, completed)
             return completed
 
         if start_block == end_block or depth >= 32:
@@ -279,10 +282,25 @@ class BscRpcClient:
                 f"{MAX_LOGS_PER_INTERVAL} logs at minimum split size; refusing truncation."
             )
         midpoint = (start_block + end_block) // 2
-        # Newest half first: if the request budget is reached, recent data is retained.
-        newer = self._fetch_block_range(midpoint + 1, end_block, on_interval, depth + 1)
-        older = self._fetch_block_range(start_block, midpoint, on_interval, depth + 1)
-        unique = {(row["chain"], row["tx_hash"], row["event_index"]): row for row in newer + older}
+        if newest_first:
+            first = self._fetch_block_range(
+                midpoint + 1, end_block, on_interval, depth + 1,
+                on_interval_complete, newest_first,
+            )
+            second = self._fetch_block_range(
+                start_block, midpoint, on_interval, depth + 1,
+                on_interval_complete, newest_first,
+            )
+        else:
+            first = self._fetch_block_range(
+                start_block, midpoint, on_interval, depth + 1,
+                on_interval_complete, newest_first,
+            )
+            second = self._fetch_block_range(
+                midpoint + 1, end_block, on_interval, depth + 1,
+                on_interval_complete, newest_first,
+            )
+        unique = {(row["chain"], row["tx_hash"], row["event_index"]): row for row in first + second}
         return list(unique.values())
 
     def fetch_window(self, hours: int = 1, on_interval=None,
