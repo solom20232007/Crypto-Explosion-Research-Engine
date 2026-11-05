@@ -204,23 +204,39 @@ class BscRpcClient:
         # accepting the complete set of Transfer logs.
         receipts_complete = False
         receipt_block_timestamp = None
-        if logs is not None and len(logs) >= MAX_LOGS_PER_INTERVAL and start_block == end_block:
+        if start_block == end_block and (
+            logs is None or len(logs) >= MAX_LOGS_PER_INTERVAL
+        ):
             try:
                 block = self._block(start_block)
                 transactions = block.get("transactions")
                 if not isinstance(transactions, list):
                     raise RuntimeError("block response omitted its transaction list")
-                receipts = self._rpc("eth_getBlockReceipts", [hex(start_block)])
-                if not isinstance(receipts, list):
-                    raise RuntimeError("eth_getBlockReceipts returned a non-list result")
-                if len(receipts) != len(transactions):
+
+                # Prefer the bulk receipt method. If the public RPC does not
+                # implement it, fall back to standard per-transaction receipts
+                # in JSON-RPC batches. Never accept partial receipt coverage.
+                try:
+                    receipts = self._rpc("eth_getBlockReceipts", [hex(start_block)])
+                    if not isinstance(receipts, list):
+                        raise RuntimeError("eth_getBlockReceipts returned a non-list result")
+                except RuntimeError:
+                    receipts = []
+                    for offset in range(0, len(transactions), 50):
+                        hashes = transactions[offset:offset + 50]
+                        calls = [("eth_getTransactionReceipt", [tx_hash]) for tx_hash in hashes]
+                        receipts.extend(self._rpc_batch(calls))
+
+                if len(receipts) != len(transactions) or any(
+                    not isinstance(receipt, dict) for receipt in receipts
+                ):
                     raise RuntimeError(
                         f"receipt coverage mismatch: block has {len(transactions)} transactions "
-                        f"but RPC returned {len(receipts)} receipts"
+                        f"but RPC returned {len(receipts)} complete receipts"
                     )
                 receipt_logs = []
                 for receipt in receipts:
-                    if not isinstance(receipt, dict) or not isinstance(receipt.get("logs"), list):
+                    if not isinstance(receipt.get("logs"), list):
                         raise RuntimeError("a transaction receipt omitted its logs array")
                     for item in receipt["logs"]:
                         topics = item.get("topics") or []
@@ -230,9 +246,12 @@ class BscRpcClient:
                 receipt_block_timestamp = self._hex_int(block["timestamp"])
                 receipts_complete = True
             except RuntimeError as exc:
+                reason = (
+                    "eth_getLogs exceeded the provider result cap"
+                    if logs is None else f"eth_getLogs returned at least {MAX_LOGS_PER_INTERVAL} logs"
+                )
                 raise RuntimeError(
-                    f"BSC block {start_block} reached the eth_getLogs result cap "
-                    f"({MAX_LOGS_PER_INTERVAL}); complete receipt fallback failed: {exc}. "
+                    f"BSC block {start_block}: {reason}; complete receipt fallback failed: {exc}. "
                     "No potentially truncated block data was uploaded."
                 ) from exc
 
