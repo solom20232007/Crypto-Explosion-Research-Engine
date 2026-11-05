@@ -85,6 +85,8 @@ def run_routescan_backfill(
         )
     cursor = _checkpoint_cursor(checkpoint, "unix_seconds")
     initial = int(checkpoint.get("initial_cursor_value", start_value))
+    last_completed_from = checkpoint.get("last_completed_from")
+    last_completed_to = checkpoint.get("last_completed_to")
     if client is None:
         api_key = __import__("os").getenv("ROUTESCAN_API_KEY")
         client = RoutescanClient(api_key)
@@ -115,6 +117,7 @@ def run_routescan_backfill(
                 completed_from=completed_from, completed_to=chunk_end,
                 status=next_status, last_error=None,
             )
+            last_completed_from, last_completed_to = completed_from, chunk_end
             cursor = chunk_end
             chunks_done += 1
             print(json.dumps({
@@ -128,6 +131,7 @@ def run_routescan_backfill(
         store.advance(
             provider=provider, chain=chain, cursor_kind="unix_seconds",
             cursor_value=cursor, initial_cursor_value=initial,
+            completed_from=last_completed_from, completed_to=last_completed_to,
             status="paused", last_error=str(exc)[:2000],
         )
         raise
@@ -137,6 +141,7 @@ def run_routescan_backfill(
         store.advance(
             provider=provider, chain=chain, cursor_kind="unix_seconds",
             cursor_value=cursor, initial_cursor_value=initial,
+            completed_from=last_completed_from, completed_to=last_completed_to,
             status="complete", last_error=None,
         )
     result = {
@@ -192,6 +197,8 @@ def run_bsc_backfill(
         )
     cursor = _checkpoint_cursor(checkpoint, "block_number")
     initial = int(checkpoint.get("initial_cursor_value", cursor))
+    last_completed_from = checkpoint.get("last_completed_from")
+    last_completed_to = checkpoint.get("last_completed_to")
     target_end_exclusive = _find_first_block_at_or_after(
         client, safe_end, latest_number, low_hint=min(cursor, latest_number)
     )
@@ -214,6 +221,7 @@ def run_bsc_backfill(
                 completed_from=cursor, completed_to=chunk_end_exclusive - 1,
                 status=next_status, last_error=None,
             )
+            last_completed_from, last_completed_to = cursor, chunk_end_exclusive - 1
             print(json.dumps({
                 "provider": provider, "chain": chain,
                 "completed_from_block": cursor,
@@ -229,6 +237,7 @@ def run_bsc_backfill(
         store.advance(
             provider=provider, chain=chain, cursor_kind="block_number",
             cursor_value=cursor, initial_cursor_value=initial,
+            completed_from=last_completed_from, completed_to=last_completed_to,
             status="paused", last_error=str(exc)[:2000],
         )
         raise
@@ -238,6 +247,7 @@ def run_bsc_backfill(
         store.advance(
             provider=provider, chain=chain, cursor_kind="block_number",
             cursor_value=cursor, initial_cursor_value=initial,
+            completed_from=last_completed_from, completed_to=last_completed_to,
             status="complete", last_error=None,
         )
     result = {
