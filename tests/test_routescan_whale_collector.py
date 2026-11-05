@@ -36,7 +36,9 @@ def test_routescan_normalizer_rejects_incomplete_events():
     assert normalize_routescan_transfer({"txHash": "0x1"}, "bsc") is None
 
 
-def test_routescan_paginates_and_deduplicates():
+def test_routescan_paginates_and_deduplicates(monkeypatch):
+    import src.routescan_whale_collector as collector
+    monkeypatch.setattr(collector, "BASE_INTERVAL_SECONDS", 3600)
     first = sample_transfer()
     second = dict(sample_transfer(), txHash="0xdef", logIndex=9)
 
@@ -70,7 +72,9 @@ def test_routescan_paginates_and_deduplicates():
     assert {row["tx_hash"] for row in rows} == {"0xabc", "0xdef"}
 
 
-def test_routescan_fails_instead_of_silently_truncating():
+def test_routescan_fails_instead_of_silently_truncating(monkeypatch):
+    import src.routescan_whale_collector as collector
+    monkeypatch.setattr(collector, "BASE_INTERVAL_SECONDS", 3600)
     item = sample_transfer()
 
     class FakeResponse:
@@ -101,7 +105,9 @@ def test_routescan_cursor_extracts_token_from_next_url():
     assert RoutescanClient._cursor_from_link(link) == "opaque-cursor"
 
 
-def test_routescan_splits_dense_windows_and_deduplicates_overlap():
+def test_routescan_splits_dense_windows_and_deduplicates_overlap(monkeypatch):
+    import src.routescan_whale_collector as collector
+    monkeypatch.setattr(collector, "BASE_INTERVAL_SECONDS", 3600)
     first = sample_transfer()
 
     class FakeResponse:
@@ -135,7 +141,9 @@ def test_routescan_splits_dense_windows_and_deduplicates_overlap():
     assert rows[0]["tx_hash"] == "0xabc"
 
 
-def test_routescan_enforces_total_request_budget():
+def test_routescan_enforces_total_request_budget(monkeypatch):
+    import src.routescan_whale_collector as collector
+    monkeypatch.setattr(collector, "BASE_INTERVAL_SECONDS", 3600)
     item = sample_transfer()
 
     class FakeResponse:
@@ -352,3 +360,25 @@ def test_routescan_http_400_reports_provider_response_body():
         assert "invalid request parameter" in str(exc)
     else:
         raise AssertionError("Expected Routescan HTTP 400 to become a diagnostic RuntimeError")
+
+
+
+def test_routescan_fetch_chain_uses_contiguous_newest_first_five_minute_slices(monkeypatch):
+    import src.routescan_whale_collector as collector
+
+    intervals = []
+
+    class RecordingClient(RoutescanClient):
+        def _fetch_interval(self, chain, chain_id, start, end, max_pages,
+                            budget, max_total_requests, depth=0, on_interval=None):
+            intervals.append((start, end))
+            return []
+
+    monkeypatch.setattr(collector, "BASE_INTERVAL_SECONDS", 300)
+    client = RecordingClient(sleep=lambda _: None)
+    client.fetch_chain("ethereum", 1, hours=1, max_pages=50, max_total_requests=100)
+
+    assert len(intervals) == 12
+    assert all(intervals[i][0] == intervals[i + 1][1] for i in range(len(intervals) - 1))
+    assert all(intervals[i][1] > intervals[i][0] for i in range(len(intervals)))
+    assert intervals[0][1] > intervals[-1][1]
