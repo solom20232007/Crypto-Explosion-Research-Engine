@@ -94,6 +94,7 @@ def run_routescan_backfill(
     budget = [0]
     chunks_done = 0
     attempted_rows = 0
+    pause_reason = None
     try:
         while cursor < end_value and chunks_done < max_chunks:
             chunk_end = min(cursor + chunk_minutes * 60, end_value)
@@ -128,13 +129,16 @@ def run_routescan_backfill(
                 "uploaded_attempted_total": attempted_rows, "requests_used": budget[0],
             }, sort_keys=True), flush=True)
     except Exception as exc:
+        is_budget_pause = "safety cap" in str(exc).lower()
+        pause_reason = str(exc)
         store.advance(
             provider=provider, chain=chain, cursor_kind="unix_seconds",
             cursor_value=cursor, initial_cursor_value=initial,
             completed_from=last_completed_from, completed_to=last_completed_to,
-            status="paused", last_error=str(exc)[:2000],
+            status="paused" if is_budget_pause else "error", last_error=str(exc)[:2000],
         )
-        raise
+        if not is_budget_pause:
+            raise
 
     final_status = "complete" if cursor >= end_value else "paused"
     if cursor >= end_value:
@@ -149,7 +153,7 @@ def run_routescan_backfill(
         "cursor_value": cursor, "target_end": end_value,
         "chunks_completed_this_run": chunks_done,
         "uploaded_attempted": attempted_rows, "requests_used": budget[0],
-        "max_total_requests": max_total_requests,
+        "max_total_requests": max_total_requests, "pause_reason": pause_reason,
     }
     print(json.dumps(result, sort_keys=True), flush=True)
     return result
@@ -204,6 +208,7 @@ def run_bsc_backfill(
     )
     chunks_done = 0
     attempted_rows = 0
+    pause_reason = None
     try:
         while cursor < target_end_exclusive and chunks_done < max_chunks:
             chunk_end_exclusive = min(cursor + chunk_blocks, target_end_exclusive)
@@ -234,13 +239,16 @@ def run_bsc_backfill(
             cursor = chunk_end_exclusive
             chunks_done += 1
     except Exception as exc:
+        is_budget_pause = "safety cap" in str(exc).lower()
+        pause_reason = str(exc)
         store.advance(
             provider=provider, chain=chain, cursor_kind="block_number",
             cursor_value=cursor, initial_cursor_value=initial,
             completed_from=last_completed_from, completed_to=last_completed_to,
-            status="paused", last_error=str(exc)[:2000],
+            status="paused" if is_budget_pause else "error", last_error=str(exc)[:2000],
         )
-        raise
+        if not is_budget_pause:
+            raise
 
     final_status = "complete" if cursor >= target_end_exclusive else "paused"
     if cursor >= target_end_exclusive:
@@ -256,7 +264,7 @@ def run_bsc_backfill(
         "chunks_completed_this_run": chunks_done,
         "uploaded_attempted": attempted_rows,
         "rpc_requests_used": client.request_count,
-        "max_total_requests": max_total_requests,
+        "max_total_requests": max_total_requests, "pause_reason": pause_reason,
     }
     print(json.dumps(result, sort_keys=True), flush=True)
     return result
