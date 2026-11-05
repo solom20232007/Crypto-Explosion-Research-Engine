@@ -285,16 +285,19 @@ class BscRpcClient:
         unique = {(row["chain"], row["tx_hash"], row["event_index"]): row for row in newer + older}
         return list(unique.values())
 
-    def fetch_window(self, hours: int = 1, on_interval=None) -> list[dict[str, Any]]:
+    def fetch_window(self, hours: int = 1, on_interval=None,
+                     minutes: int | None = None) -> list[dict[str, Any]]:
         latest_hex = self._rpc("eth_blockNumber", [])
         latest_number = self._hex_int(latest_hex)
         latest_block = self._block(latest_number)
         latest_timestamp = self._hex_int(latest_block["timestamp"])
-        start_block = self._find_start_block(latest_timestamp - hours * 3600, latest_number)
+        lookback_seconds = minutes * 60 if minutes is not None else hours * 3600
+        start_block = self._find_start_block(latest_timestamp - lookback_seconds, latest_number)
         return self._fetch_block_range(start_block, latest_number, on_interval=on_interval)
 
 
-def collect(hours: int = 1, max_total_requests: int = DEFAULT_MAX_TOTAL_REQUESTS) -> dict[str, int]:
+def collect(hours: int = 1, max_total_requests: int = DEFAULT_MAX_TOTAL_REQUESTS,
+            minutes: int | None = None) -> dict[str, int]:
     from src.routescan_whale_collector import upload_transfers
 
     client = BscRpcClient(
@@ -318,11 +321,12 @@ def collect(hours: int = 1, max_total_requests: int = DEFAULT_MAX_TOTAL_REQUESTS
             "rpc_requests_used": client.request_count,
         }, sort_keys=True), flush=True)
 
-    rows = client.fetch_window(hours=hours, on_interval=persist)
+    rows = client.fetch_window(hours=hours, on_interval=persist, minutes=minutes)
     result = {
         "provider": PROVIDER,
         "chain": CHAIN,
         "lookback_hours": hours,
+        "lookback_minutes": minutes,
         "scope": "global_bep20_transfer_events",
         "total": len(rows),
         "uploaded_attempted": uploaded_attempted,
@@ -336,13 +340,16 @@ def collect(hours: int = 1, max_total_requests: int = DEFAULT_MAX_TOTAL_REQUESTS
 def main() -> None:
     parser = argparse.ArgumentParser(description="Collect global BSC BEP-20 Transfer events using public JSON-RPC")
     parser.add_argument("--hours", type=int, default=int(os.getenv("ROUTESCAN_LOOKBACK_HOURS", "1")))
+    parser.add_argument("--minutes", type=int, default=int(os.getenv("ROUTESCAN_LOOKBACK_MINUTES", "0")) or None)
     parser.add_argument("--max-total-requests", type=int, default=int(
         os.getenv("ROUTESCAN_MAX_TOTAL_REQUESTS", str(DEFAULT_MAX_TOTAL_REQUESTS))
     ))
     args = parser.parse_args()
     if not 1 <= args.hours <= 24 or args.max_total_requests < 1:
         parser.error("--hours must be 1-24 and --max-total-requests must be positive")
-    collect(args.hours, args.max_total_requests)
+    if args.minutes is not None and not 1 <= args.minutes <= 1440:
+        parser.error("--minutes must be 1-1440")
+    collect(args.hours, args.max_total_requests, minutes=args.minutes)
 
 
 if __name__ == "__main__":
