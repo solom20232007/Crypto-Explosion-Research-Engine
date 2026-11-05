@@ -131,3 +131,81 @@ def test_rpc_request_budget_is_enforced():
         assert "safety cap of 1" in str(exc)
     else:
         raise AssertionError("Expected RPC request safety cap")
+
+
+
+def test_single_dense_block_uses_complete_receipts_instead_of_truncating(monkeypatch):
+    import src.bsc_rpc_whale_collector as collector
+
+    monkeypatch.setattr(collector, "MAX_LOGS_PER_INTERVAL", 1)
+
+    class Response:
+        status_code = 200
+        text = ""
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        def json(self):
+            return self.payload
+
+    class Session:
+        def post(self, url, json, timeout):
+            method = json["method"]
+            if method == "eth_getLogs":
+                result = [sample_log("0x10", "0x1")]
+            elif method == "eth_getBlockReceipts":
+                result = [{
+                    "logs": [
+                        sample_log("0x10", "0x1"),
+                        sample_log("0x10", "0x2"),
+                    ]
+                }]
+            elif method == "eth_getBlockByNumber":
+                result = {"timestamp": "0x10", "transactions": ["0xtx"]}
+            else:
+                raise AssertionError(f"Unexpected RPC method: {method}")
+            return Response({"jsonrpc": "2.0", "id": json["id"], "result": result})
+
+    client = BscRpcClient(session=Session(), sleep=lambda _: None)
+    rows = client._fetch_block_range(16, 16)
+    assert len(rows) == 2
+    assert {row["event_index"] for row in rows} == {1, 2}
+
+
+def test_single_dense_block_rejects_incomplete_receipt_fallback(monkeypatch):
+    import src.bsc_rpc_whale_collector as collector
+
+    monkeypatch.setattr(collector, "MAX_LOGS_PER_INTERVAL", 1)
+
+    class Response:
+        status_code = 200
+        text = ""
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        def json(self):
+            return self.payload
+
+    class Session:
+        def post(self, url, json, timeout):
+            method = json["method"]
+            if method == "eth_getLogs":
+                result = [sample_log("0x10", "0x1")]
+            elif method == "eth_getBlockReceipts":
+                result = []
+            elif method == "eth_getBlockByNumber":
+                result = {"timestamp": "0x10", "transactions": ["0xtx"]}
+            else:
+                raise AssertionError(f"Unexpected RPC method: {method}")
+            return Response({"jsonrpc": "2.0", "id": json["id"], "result": result})
+
+    client = BscRpcClient(session=Session(), sleep=lambda _: None)
+    try:
+        client._fetch_block_range(16, 16)
+    except RuntimeError as exc:
+        assert "receipt coverage mismatch" in str(exc)
+        assert "No potentially truncated block data was uploaded" in str(exc)
+    else:
+        raise AssertionError("Expected incomplete receipt fallback to be rejected")
