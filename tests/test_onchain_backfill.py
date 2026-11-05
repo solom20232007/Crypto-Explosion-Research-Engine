@@ -25,14 +25,17 @@ class FakeStore:
 
 
 class FakeRoutescan:
-    def __init__(self, fail=False, fail_on_call=None):
+    def __init__(self, fail=False, fail_on_call=None, budget_fail=False):
         self.calls = []
         self.fail = fail
         self.fail_on_call = fail_on_call
+        self.budget_fail = budget_fail
 
     def _fetch_interval(self, chain, chain_id, start, end, max_pages, budget, max_requests):
         self.calls.append((int(start.timestamp()), int(end.timestamp())))
         budget[0] += 1
+        if self.budget_fail:
+            raise RuntimeError("Routescan safety cap of 1 requests per chain reached")
         if self.fail or self.fail_on_call == len(self.calls):
             raise RuntimeError("simulated request cap")
         return []
@@ -124,4 +127,18 @@ def test_routescan_resume_preserves_last_completed_chunk_after_later_failure(mon
     assert store.row["cursor_value"] == 1000300
     assert store.row["last_completed_from"] == 1000000
     assert store.row["last_completed_to"] == 1000300
+    assert store.row["status"] == "paused"
+
+
+def test_routescan_budget_cap_is_a_resumable_pause_not_a_failed_run(monkeypatch):
+    store = FakeStore()
+    client = FakeRoutescan(budget_fail=True)
+    monkeypatch.setattr(onchain_backfill, "upload_transfers", lambda rows: len(rows))
+    result = onchain_backfill.run_routescan_backfill(
+        "1970-01-12T13:46:40Z", "1970-01-12T13:56:40Z",
+        chunk_minutes=5, max_chunks=1, store=store, client=client,
+    )
+    assert result["status"] == "paused"
+    assert "safety cap" in result["pause_reason"]
+    assert store.row["cursor_value"] == 1000000
     assert store.row["status"] == "paused"
