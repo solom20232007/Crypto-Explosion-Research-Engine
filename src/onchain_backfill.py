@@ -98,36 +98,49 @@ def run_routescan_backfill(
     try:
         while cursor < end_value and chunks_done < max_chunks:
             chunk_end = min(cursor + chunk_minutes * 60, end_value)
-            rows = client._fetch_interval(
+
+            def persist_leaf(leaf_start, leaf_end, rows):
+                nonlocal cursor, attempted_rows, last_completed_from, last_completed_to
+                completed_from = int(leaf_start.timestamp())
+                completed_to = int(leaf_end.timestamp())
+                if completed_from != cursor:
+                    raise RuntimeError(
+                        f"Routescan backfill interval order mismatch: expected {cursor}, got {completed_from}"
+                    )
+                observed = datetime.now(timezone.utc).isoformat()
+                for row in rows:
+                    row["observed_at_utc"] = observed
+                attempted = upload_transfers(rows) if rows else 0
+                attempted_rows += attempted
+                next_status = "complete" if completed_to >= end_value else "ready"
+                store.advance(
+                    provider=provider, chain=chain, cursor_kind="unix_seconds",
+                    cursor_value=completed_to, initial_cursor_value=initial,
+                    completed_from=completed_from, completed_to=completed_to,
+                    status=next_status, last_error=None,
+                )
+                last_completed_from, last_completed_to = completed_from, completed_to
+                cursor = completed_to
+                print(json.dumps({
+                    "provider": provider, "chain": chain,
+                    "completed_from_utc": datetime.fromtimestamp(completed_from, timezone.utc).isoformat(),
+                    "completed_to_utc": datetime.fromtimestamp(completed_to, timezone.utc).isoformat(),
+                    "checkpoint_cursor": cursor, "chunk_rows_attempted": attempted,
+                    "uploaded_attempted_total": attempted_rows, "requests_used": budget[0],
+                }, sort_keys=True), flush=True)
+
+            client._fetch_interval(
                 chain, DEFAULT_CHAINS[chain],
                 datetime.fromtimestamp(cursor, timezone.utc),
                 datetime.fromtimestamp(chunk_end, timezone.utc),
                 max_pages, budget, max_total_requests,
+                on_interval_complete=persist_leaf, newest_first=False,
             )
-            observed = datetime.now(timezone.utc).isoformat()
-            for row in rows:
-                row["observed_at_utc"] = observed
-            attempted = upload_transfers(rows) if rows else 0
-            attempted_rows += attempted
-
-            next_status = "complete" if chunk_end >= end_value else "ready"
-            completed_from = cursor
-            store.advance(
-                provider=provider, chain=chain, cursor_kind="unix_seconds",
-                cursor_value=chunk_end, initial_cursor_value=initial,
-                completed_from=completed_from, completed_to=chunk_end,
-                status=next_status, last_error=None,
-            )
-            last_completed_from, last_completed_to = completed_from, chunk_end
-            cursor = chunk_end
+            if cursor != chunk_end:
+                raise RuntimeError(
+                    f"Routescan backfill chunk did not reach its end: expected {chunk_end}, got {cursor}"
+                )
             chunks_done += 1
-            print(json.dumps({
-                "provider": provider, "chain": chain,
-                "completed_from_utc": datetime.fromtimestamp(completed_from, timezone.utc).isoformat(),
-                "completed_to_utc": datetime.fromtimestamp(cursor, timezone.utc).isoformat(),
-                "checkpoint_cursor": cursor, "chunk_rows_attempted": attempted,
-                "uploaded_attempted_total": attempted_rows, "requests_used": budget[0],
-            }, sort_keys=True), flush=True)
     except Exception as exc:
         is_budget_pause = "safety cap" in str(exc).lower()
         pause_reason = str(exc)
@@ -212,31 +225,46 @@ def run_bsc_backfill(
     try:
         while cursor < target_end_exclusive and chunks_done < max_chunks:
             chunk_end_exclusive = min(cursor + chunk_blocks, target_end_exclusive)
-            rows = client._fetch_block_range(cursor, chunk_end_exclusive - 1)
-            observed = datetime.now(timezone.utc).isoformat()
-            for row in rows:
-                row["observed_at_utc"] = observed
-            attempted = upload_transfers(rows) if rows else 0
-            attempted_rows += attempted
 
-            next_status = "complete" if chunk_end_exclusive >= target_end_exclusive else "ready"
-            store.advance(
-                provider=provider, chain=chain, cursor_kind="block_number",
-                cursor_value=chunk_end_exclusive, initial_cursor_value=initial,
-                completed_from=cursor, completed_to=chunk_end_exclusive - 1,
-                status=next_status, last_error=None,
+            def persist_block_leaf(leaf_start, leaf_end, rows):
+                nonlocal cursor, attempted_rows, last_completed_from, last_completed_to
+                if leaf_start != cursor:
+                    raise RuntimeError(
+                        f"BSC backfill interval order mismatch: expected {cursor}, got {leaf_start}"
+                    )
+                observed = datetime.now(timezone.utc).isoformat()
+                for row in rows:
+                    row["observed_at_utc"] = observed
+                attempted = upload_transfers(rows) if rows else 0
+                attempted_rows += attempted
+                next_cursor = leaf_end + 1
+                next_status = "complete" if next_cursor >= target_end_exclusive else "ready"
+                store.advance(
+                    provider=provider, chain=chain, cursor_kind="block_number",
+                    cursor_value=next_cursor, initial_cursor_value=initial,
+                    completed_from=leaf_start, completed_to=leaf_end,
+                    status=next_status, last_error=None,
+                )
+                last_completed_from, last_completed_to = leaf_start, leaf_end
+                cursor = next_cursor
+                print(json.dumps({
+                    "provider": provider, "chain": chain,
+                    "completed_from_block": leaf_start,
+                    "completed_to_block": leaf_end,
+                    "checkpoint_next_block": cursor,
+                    "chunk_rows_attempted": attempted,
+                    "uploaded_attempted_total": attempted_rows,
+                    "rpc_requests_used": client.request_count,
+                }, sort_keys=True), flush=True)
+
+            client._fetch_block_range(
+                cursor, chunk_end_exclusive - 1,
+                on_interval_complete=persist_block_leaf, newest_first=False,
             )
-            last_completed_from, last_completed_to = cursor, chunk_end_exclusive - 1
-            print(json.dumps({
-                "provider": provider, "chain": chain,
-                "completed_from_block": cursor,
-                "completed_to_block": chunk_end_exclusive - 1,
-                "checkpoint_next_block": chunk_end_exclusive,
-                "chunk_rows_attempted": attempted,
-                "uploaded_attempted_total": attempted_rows,
-                "rpc_requests_used": client.request_count,
-            }, sort_keys=True), flush=True)
-            cursor = chunk_end_exclusive
+            if cursor != chunk_end_exclusive:
+                raise RuntimeError(
+                    f"BSC backfill chunk did not reach its end: expected {chunk_end_exclusive}, got {cursor}"
+                )
             chunks_done += 1
     except Exception as exc:
         is_budget_pause = "safety cap" in str(exc).lower()
