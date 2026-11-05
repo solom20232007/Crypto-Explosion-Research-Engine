@@ -64,7 +64,7 @@ jobs:
           echo "=== Ethereum / Routescan ==="
           python -m src.routescan_whale_collector --hours "${ROUTESCAN_LOOKBACK_HOURS}" --max-pages "${ROUTESCAN_MAX_PAGES}" --max-total-requests "${ROUTESCAN_MAX_TOTAL_REQUESTS}"
           ethereum_status=$?
-          echo "=== BSC / Etherscan V2 ==="
+          echo "=== BSC / Public JSON-RPC ==="
           python -m src.bsc_rpc_whale_collector --hours "${ROUTESCAN_LOOKBACK_HOURS}" --max-total-requests "${ROUTESCAN_MAX_TOTAL_REQUESTS}"
           bsc_status=$?
           if [ "$ethereum_status" -ne 0 ] || [ "$bsc_status" -ne 0 ]; then
