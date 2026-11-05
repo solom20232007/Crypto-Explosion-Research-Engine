@@ -210,12 +210,15 @@ class RoutescanClient:
                 f"exceeds {max_pages * PAGE_SIZE} rows at minimum split size; refusing truncation."
             )
         midpoint = start + (end - start) / 2
-        overlap = min(1.0, duration / 100.0)
-        # Process the newest half first. When a dense chain exhausts its
-        # request budget, checkpoints therefore preserve the freshest data.
-        right = self._fetch_interval(chain, chain_id, midpoint - timedelta(seconds=overlap), end,
+        # Routescan documents timestampFrom as inclusive and timestampTo as
+        # exclusive. Split on the exact midpoint instead of overlapping both
+        # children; this avoids re-fetching boundary transfers and wasting the
+        # limited API request budget.
+        # Process the newest half first so completed checkpoints preserve the
+        # freshest data if the request budget is exhausted later.
+        right = self._fetch_interval(chain, chain_id, midpoint, end,
                                      max_pages, budget, max_total_requests, depth + 1, on_interval)
-        left = self._fetch_interval(chain, chain_id, start, midpoint + timedelta(seconds=overlap),
+        left = self._fetch_interval(chain, chain_id, start, midpoint,
                                     max_pages, budget, max_total_requests, depth + 1, on_interval)
         for row in right + left:
             rows[(row["chain"], row["tx_hash"], row["event_index"])] = row
