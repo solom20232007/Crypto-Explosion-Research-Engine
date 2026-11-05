@@ -31,7 +31,7 @@ permissions:
 
 concurrency:
   group: global-evm-transfer-collectors
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   collect:
