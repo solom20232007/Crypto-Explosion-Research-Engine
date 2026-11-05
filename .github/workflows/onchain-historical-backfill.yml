@@ -27,7 +27,7 @@ on:
       max_chunks:
         description: "Maximum completed chunks per chain in this run"
         required: false
-        default: "4"
+        default: "12"
         type: string
       max_total_requests:
         description: "Maximum provider requests per chain in this run"
@@ -69,14 +69,14 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           BACKFILL_START_UTC: ${{ inputs.start_utc || '2026-11-04T00:00:00Z' }}
           BACKFILL_PROVIDER: ${{ inputs.provider || 'both' }}
-          BACKFILL_MAX_CHUNKS: ${{ inputs.max_chunks || '4' }}
+          BACKFILL_MAX_CHUNKS: ${{ inputs.max_chunks || '12' }}
           BACKFILL_MAX_TOTAL_REQUESTS: ${{ inputs.max_total_requests || '1000' }}
         run: |
           python -m src.onchain_backfill \
             --provider "${BACKFILL_PROVIDER}" \
             --start-utc "${BACKFILL_START_UTC}" \
-            --chunk-minutes 30 \
-            --chunk-blocks 5000 \
+            --chunk-minutes 5 \
+            --chunk-blocks 500 \
             --max-chunks "${BACKFILL_MAX_CHUNKS}" \
             --max-pages 50 \
             --max-total-requests "${BACKFILL_MAX_TOTAL_REQUESTS}"
