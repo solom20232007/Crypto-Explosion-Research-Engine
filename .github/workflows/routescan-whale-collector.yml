@@ -2,7 +2,7 @@ name: Global EVM Transfer Collectors (Ethereum + BSC)
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/5 * * * *"
   push:
     branches:
       - research/binance-prebreakout-advisor-v1
@@ -13,7 +13,7 @@ on:
       lookback_minutes:
         description: "Overlapping incremental lookback window (1-1440 minutes)"
         required: false
-        default: "15"
+        default: "7"
         type: string
       max_pages:
         description: "Maximum Routescan pages per time window; dense windows are split"
@@ -58,7 +58,7 @@ jobs:
           BSC_RPC_URL: ${{ secrets.BSC_RPC_URL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
-          ROUTESCAN_LOOKBACK_MINUTES: ${{ inputs.lookback_minutes || '15' }}
+          ROUTESCAN_LOOKBACK_MINUTES: ${{ inputs.lookback_minutes || '7' }}
           ROUTESCAN_MAX_PAGES: ${{ inputs.max_pages || '50' }}
           ROUTESCAN_MAX_TOTAL_REQUESTS: ${{ inputs.max_total_requests || '1000' }}
         run: |
