@@ -1,3 +1,3 @@
 One-time trigger for the Routescan collector on the research branch only. Safe to leave unchanged; no recurring schedule.
 
-2026-11-05: run the updated one-hour Ethereum Routescan + BSC public JSON-RPC collectors after the collector and research test suites passed.
+2026-11-05: rerun updated one-hour Ethereum Routescan + BSC public JSON-RPC collectors; replace stale in-progress run after passing tests.
