@@ -363,7 +363,7 @@ def test_routescan_http_400_reports_provider_response_body():
 
 
 
-def test_routescan_fetch_chain_uses_contiguous_newest_first_five_minute_slices(monkeypatch):
+def test_routescan_fetch_chain_uses_contiguous_newest_first_one_minute_slices(monkeypatch):
     import src.routescan_whale_collector as collector
 
     intervals = []
@@ -382,3 +382,24 @@ def test_routescan_fetch_chain_uses_contiguous_newest_first_five_minute_slices(m
     assert all(intervals[i][0] == intervals[i + 1][1] for i in range(len(intervals) - 1))
     assert all(intervals[i][1] > intervals[i][0] for i in range(len(intervals)))
     assert intervals[0][1] > intervals[-1][1]
+
+
+
+def test_routescan_fetch_chain_supports_short_minute_lookback(monkeypatch):
+    import src.routescan_whale_collector as collector
+
+    intervals = []
+
+    class RecordingClient(RoutescanClient):
+        def _fetch_interval(self, chain, chain_id, start, end, max_pages,
+                            budget, max_total_requests, depth=0, on_interval=None):
+            intervals.append((start, end))
+            return []
+
+    monkeypatch.setattr(collector, "BASE_INTERVAL_SECONDS", 60)
+    client = RecordingClient(sleep=lambda _: None)
+    client.fetch_chain("ethereum", 1, minutes=15, max_pages=50, max_total_requests=100)
+
+    assert len(intervals) == 15
+    assert all(intervals[i][0] == intervals[i + 1][1] for i in range(len(intervals) - 1))
+    assert all(intervals[i][1] > intervals[i][0] for i in range(len(intervals)))
