@@ -31,13 +31,16 @@ class FakeRoutescan:
         self.fail_on_call = fail_on_call
         self.budget_fail = budget_fail
 
-    def _fetch_interval(self, chain, chain_id, start, end, max_pages, budget, max_requests):
+    def _fetch_interval(self, chain, chain_id, start, end, max_pages, budget, max_requests,
+                        on_interval_complete=None, newest_first=True):
         self.calls.append((int(start.timestamp()), int(end.timestamp())))
         budget[0] += 1
         if self.budget_fail:
             raise RuntimeError("Routescan safety cap of 1 requests per chain reached")
         if self.fail or self.fail_on_call == len(self.calls):
             raise RuntimeError("simulated request cap")
+        if on_interval_complete:
+            on_interval_complete(start, end, [])
         return []
 
 
@@ -59,9 +62,11 @@ class FakeBsc:
         self.request_count += 1
         return {"timestamp": hex(1000 + number * 3)}
 
-    def _fetch_block_range(self, start, end):
+    def _fetch_block_range(self, start, end, on_interval_complete=None, newest_first=True):
         self.ranges.append((start, end))
         self.request_count += 1
+        if on_interval_complete:
+            on_interval_complete(start, end, [])
         return []
 
 
