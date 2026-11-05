@@ -98,7 +98,7 @@ def test_routescan_backfill_does_not_advance_failed_interval(monkeypatch):
     else:
         raise AssertionError("Expected simulated failure")
     assert store.row["cursor_value"] == 1000000
-    assert store.row["status"] == "paused"
+    assert store.row["status"] == "error"
 
 
 def test_bsc_backfill_advances_in_block_ranges_even_when_empty(monkeypatch):
@@ -132,7 +132,7 @@ def test_routescan_resume_preserves_last_completed_chunk_after_later_failure(mon
     assert store.row["cursor_value"] == 1000300
     assert store.row["last_completed_from"] == 1000000
     assert store.row["last_completed_to"] == 1000300
-    assert store.row["status"] == "paused"
+    assert store.row["status"] == "error"
 
 
 def test_routescan_budget_cap_is_a_resumable_pause_not_a_failed_run(monkeypatch):
