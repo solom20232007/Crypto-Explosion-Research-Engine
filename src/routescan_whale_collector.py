@@ -159,7 +159,8 @@ class RoutescanClient:
 
     def _fetch_interval(self, chain: str, chain_id: int, start: datetime, end: datetime,
                         max_pages: int, budget: list[int], max_total_requests: int,
-                        depth: int = 0, on_interval=None) -> list[dict[str, Any]]:
+                        depth: int = 0, on_interval=None, on_interval_complete=None,
+                        newest_first: bool = True) -> list[dict[str, Any]]:
         params: dict[str, Any] = {
             "timestampFrom": start.isoformat().replace("+00:00", "Z"),
             "timestampTo": end.isoformat().replace("+00:00", "Z"),
@@ -202,6 +203,8 @@ class RoutescanClient:
             # interval hits the request budget, completed intervals remain safe.
             if on_interval and completed_rows:
                 on_interval(completed_rows)
+            if on_interval_complete:
+                on_interval_complete(start, end, completed_rows)
             return completed_rows
 
         duration = (end - start).total_seconds()
@@ -217,11 +220,29 @@ class RoutescanClient:
         # limited API request budget.
         # Process the newest half first so completed checkpoints preserve the
         # freshest data if the request budget is exhausted later.
-        right = self._fetch_interval(chain, chain_id, midpoint, end,
-                                     max_pages, budget, max_total_requests, depth + 1, on_interval)
-        left = self._fetch_interval(chain, chain_id, start, midpoint,
-                                    max_pages, budget, max_total_requests, depth + 1, on_interval)
-        for row in right + left:
+        if newest_first:
+            first = self._fetch_interval(
+                chain, chain_id, midpoint, end, max_pages, budget,
+                max_total_requests, depth + 1, on_interval,
+                on_interval_complete, newest_first,
+            )
+            second = self._fetch_interval(
+                chain, chain_id, start, midpoint, max_pages, budget,
+                max_total_requests, depth + 1, on_interval,
+                on_interval_complete, newest_first,
+            )
+        else:
+            first = self._fetch_interval(
+                chain, chain_id, start, midpoint, max_pages, budget,
+                max_total_requests, depth + 1, on_interval,
+                on_interval_complete, newest_first,
+            )
+            second = self._fetch_interval(
+                chain, chain_id, midpoint, end, max_pages, budget,
+                max_total_requests, depth + 1, on_interval,
+                on_interval_complete, newest_first,
+            )
+        for row in first + second:
             rows[(row["chain"], row["tx_hash"], row["event_index"])] = row
         return list(rows.values())
 
