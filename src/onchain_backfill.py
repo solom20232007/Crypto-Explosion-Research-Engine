@@ -108,18 +108,18 @@ def run_routescan_backfill(
             attempted_rows += attempted
 
             next_status = "complete" if chunk_end >= end_value else "ready"
+            completed_from = cursor
             store.advance(
                 provider=provider, chain=chain, cursor_kind="unix_seconds",
                 cursor_value=chunk_end, initial_cursor_value=initial,
-                completed_from=cursor, completed_to=chunk_end,
+                completed_from=completed_from, completed_to=chunk_end,
                 status=next_status, last_error=None,
             )
             cursor = chunk_end
             chunks_done += 1
             print(json.dumps({
                 "provider": provider, "chain": chain,
-                "completed_from_utc": datetime.fromtimestamp(cursor - (chunk_end - (cursor - (chunk_end - cursor))), timezone.utc).isoformat()
-                if False else datetime.fromtimestamp(int(store.get(provider, chain)["last_completed_from"]), timezone.utc).isoformat(),
+                "completed_from_utc": datetime.fromtimestamp(completed_from, timezone.utc).isoformat(),
                 "completed_to_utc": datetime.fromtimestamp(cursor, timezone.utc).isoformat(),
                 "checkpoint_cursor": cursor, "chunk_rows_attempted": attempted,
                 "uploaded_attempted_total": attempted_rows, "requests_used": budget[0],
