@@ -21,6 +21,7 @@ import requests
 BASE_URL = "https://api.routescan.io/v2/network/mainnet/evm"
 PROVIDER = "routescan_v2"
 PAGE_SIZE = 100
+BASE_INTERVAL_SECONDS = 300  # Five-minute slices reduce recursive pagination waste.
 DEFAULT_MAX_TOTAL_REQUESTS_PER_CHAIN = 300
 DEFAULT_CHAINS = {"ethereum": 1}
 
@@ -230,8 +231,26 @@ class RoutescanClient:
                     on_interval=None) -> list[dict[str, Any]]:
         end = datetime.now(timezone.utc)
         start = end - timedelta(hours=hours)
-        return self._fetch_interval(chain, chain_id, start, end, max_pages, [0], max_total_requests,
-                                    on_interval=on_interval)
+        budget = [0]
+        rows: dict[tuple[str, str, int], dict[str, Any]] = {}
+        cursor = end
+
+        # Start with bounded five-minute windows instead of repeatedly querying
+        # a dense one-hour range and discarding pages before recursive splits.
+        # The windows are contiguous: timestampFrom is inclusive and timestampTo
+        # is exclusive, so no boundary overlap or missing second is introduced.
+        # Newest windows run first to preserve recent completed checkpoints.
+        while cursor > start:
+            interval_start = max(start, cursor - timedelta(seconds=BASE_INTERVAL_SECONDS))
+            interval_rows = self._fetch_interval(
+                chain, chain_id, interval_start, cursor, max_pages, budget,
+                max_total_requests, on_interval=on_interval
+            )
+            for row in interval_rows:
+                key = (row["chain"], row["tx_hash"], row["event_index"])
+                rows[key] = row
+            cursor = interval_start
+        return list(rows.values())
 
 
 def _json_default(value: Any) -> Any:
