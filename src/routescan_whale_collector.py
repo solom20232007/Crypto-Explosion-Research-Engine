@@ -228,15 +228,15 @@ class RoutescanClient:
     def fetch_chain(self, chain: str, chain_id: int, hours: int = 1,
                     max_pages: int = 50,
                     max_total_requests: int = DEFAULT_MAX_TOTAL_REQUESTS_PER_CHAIN,
-                    on_interval=None) -> list[dict[str, Any]]:
+                    on_interval=None, minutes: int | None = None) -> list[dict[str, Any]]:
         end = datetime.now(timezone.utc)
-        start = end - timedelta(hours=hours)
+        start = end - (timedelta(minutes=minutes) if minutes is not None else timedelta(hours=hours))
         budget = [0]
         rows: dict[tuple[str, str, int], dict[str, Any]] = {}
         cursor = end
 
-        # Start with bounded five-minute windows instead of repeatedly querying
-        # a dense one-hour range and discarding pages before recursive splits.
+        # Start with bounded one-minute windows instead of repeatedly querying
+        # a dense long range and discarding pages before recursive splits.
         # The windows are contiguous: timestampFrom is inclusive and timestampTo
         # is exclusive, so no boundary overlap or missing second is introduced.
         # Newest windows run first to preserve recent completed checkpoints.
@@ -288,7 +288,8 @@ def upload_transfers(rows: list[dict[str, Any]], session: requests.Session | Non
 
 
 def collect(hours: int = 1, max_pages: int = 50,
-            max_total_requests: int = DEFAULT_MAX_TOTAL_REQUESTS_PER_CHAIN) -> dict[str, int]:
+            max_total_requests: int = DEFAULT_MAX_TOTAL_REQUESTS_PER_CHAIN,
+            minutes: int | None = None) -> dict[str, int]:
     client = RoutescanClient(os.getenv("ROUTESCAN_API_KEY"))
     counts: dict[str, int] = {}
     uploaded_attempted = 0
@@ -309,7 +310,7 @@ def collect(hours: int = 1, max_pages: int = 50,
         try:
             rows = client.fetch_chain(chain, chain_id, hours=hours, max_pages=max_pages,
                                       max_total_requests=max_total_requests,
-                                      on_interval=persist_completed_interval)
+                                      on_interval=persist_completed_interval, minutes=minutes)
             # fetch_chain invokes the callback for every fully paginated interval.
             counts[chain] = len(rows)
         except RuntimeError as exc:
@@ -322,7 +323,8 @@ def collect(hours: int = 1, max_pages: int = 50,
 
     counts["total"] = sum(counts.values())
     counts["uploaded_attempted"] = uploaded_attempted
-    result = {"provider": PROVIDER, "lookback_hours": hours, "scope": "global_erc20_transfers",
+    result = {"provider": PROVIDER, "lookback_hours": hours,
+              "lookback_minutes": minutes, "scope": "global_erc20_transfers",
               "usd_filter": "none", "max_total_requests_per_chain": max_total_requests,
               "upload_mode": "completed_intervals", "errors": errors, **counts}
     print(json.dumps(result, sort_keys=True))
@@ -334,14 +336,17 @@ def collect(hours: int = 1, max_pages: int = 50,
 def main() -> None:
     parser = argparse.ArgumentParser(description="Collect global EVM ERC-20 transfers from Routescan")
     parser.add_argument("--hours", type=int, default=int(os.getenv("ROUTESCAN_LOOKBACK_HOURS", "1")))
+    parser.add_argument("--minutes", type=int, default=int(os.getenv("ROUTESCAN_LOOKBACK_MINUTES", "0")) or None)
     parser.add_argument("--max-pages", type=int, default=int(os.getenv("ROUTESCAN_MAX_PAGES", "50")))
     parser.add_argument("--max-total-requests", type=int, default=int(os.getenv("ROUTESCAN_MAX_TOTAL_REQUESTS", str(DEFAULT_MAX_TOTAL_REQUESTS_PER_CHAIN))))
     args = parser.parse_args()
     if not 1 <= args.hours <= 24 or args.max_pages < 1:
         parser.error("--hours must be 1-24 and --max-pages must be positive")
+    if args.minutes is not None and not 1 <= args.minutes <= 1440:
+        parser.error("--minutes must be 1-1440")
     if args.max_total_requests < 1:
         parser.error("--max-total-requests must be positive")
-    collect(args.hours, args.max_pages, args.max_total_requests)
+    collect(args.hours, args.max_pages, args.max_total_requests, minutes=args.minutes)
 
 
 if __name__ == "__main__":
