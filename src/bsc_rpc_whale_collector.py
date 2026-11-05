@@ -197,8 +197,51 @@ class BscRpcClient:
 
         if logs is not None and not isinstance(logs, list):
             raise RuntimeError("BSC eth_getLogs returned a non-list result")
-        if logs is not None and len(logs) < MAX_LOGS_PER_INTERVAL:
-            timestamps = self._block_timestamps(logs) if logs else {}
+
+        # Some RPC gateways cap eth_getLogs results even for a single block.
+        # A block cannot be split further, so retrieve every transaction receipt
+        # and verify receipt coverage against the block transaction count before
+        # accepting the complete set of Transfer logs.
+        receipts_complete = False
+        receipt_block_timestamp = None
+        if logs is not None and len(logs) >= MAX_LOGS_PER_INTERVAL and start_block == end_block:
+            try:
+                block = self._block(start_block)
+                transactions = block.get("transactions")
+                if not isinstance(transactions, list):
+                    raise RuntimeError("block response omitted its transaction list")
+                receipts = self._rpc("eth_getBlockReceipts", [hex(start_block)])
+                if not isinstance(receipts, list):
+                    raise RuntimeError("eth_getBlockReceipts returned a non-list result")
+                if len(receipts) != len(transactions):
+                    raise RuntimeError(
+                        f"receipt coverage mismatch: block has {len(transactions)} transactions "
+                        f"but RPC returned {len(receipts)} receipts"
+                    )
+                receipt_logs = []
+                for receipt in receipts:
+                    if not isinstance(receipt, dict) or not isinstance(receipt.get("logs"), list):
+                        raise RuntimeError("a transaction receipt omitted its logs array")
+                    for item in receipt["logs"]:
+                        topics = item.get("topics") or []
+                        if topics and str(topics[0]).lower() == TRANSFER_TOPIC:
+                            receipt_logs.append(item)
+                logs = receipt_logs
+                receipt_block_timestamp = self._hex_int(block["timestamp"])
+                receipts_complete = True
+            except RuntimeError as exc:
+                raise RuntimeError(
+                    f"BSC block {start_block} reached the eth_getLogs result cap "
+                    f"({MAX_LOGS_PER_INTERVAL}); complete receipt fallback failed: {exc}. "
+                    "No potentially truncated block data was uploaded."
+                ) from exc
+
+        if logs is not None and (len(logs) < MAX_LOGS_PER_INTERVAL or receipts_complete):
+            timestamps = (
+                {start_block: receipt_block_timestamp}
+                if receipts_complete
+                else (self._block_timestamps(logs) if logs else {})
+            )
             rows = []
             for item in logs:
                 number = self._hex_int(item["blockNumber"])
