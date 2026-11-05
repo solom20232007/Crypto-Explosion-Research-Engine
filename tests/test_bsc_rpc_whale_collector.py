@@ -209,3 +209,59 @@ def test_single_dense_block_rejects_incomplete_receipt_fallback(monkeypatch):
         assert "No potentially truncated block data was uploaded" in str(exc)
     else:
         raise AssertionError("Expected incomplete receipt fallback to be rejected")
+
+
+
+def test_single_block_eth_getlogs_error_uses_complete_transaction_receipts(monkeypatch):
+    import src.bsc_rpc_whale_collector as collector
+
+    monkeypatch.setattr(collector, "MAX_LOGS_PER_INTERVAL", 1)
+
+    class Response:
+        status_code = 200
+        text = ""
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        def json(self):
+            return self.payload
+
+    class Session:
+        def post(self, url, json, timeout):
+            if isinstance(json, list):
+                return Response([
+                    {
+                        "jsonrpc": "2.0",
+                        "id": item["id"],
+                        "result": {
+                            "logs": [
+                                sample_log("0x10", "0x1"),
+                                sample_log("0x10", "0x2"),
+                            ]
+                        },
+                    }
+                    for item in json
+                ])
+            method = json["method"]
+            if method == "eth_getLogs":
+                return Response({
+                    "jsonrpc": "2.0", "id": json["id"],
+                    "error": {"code": -32005, "message": "query returned more than 2000 results"},
+                })
+            if method == "eth_getBlockReceipts":
+                return Response({
+                    "jsonrpc": "2.0", "id": json["id"],
+                    "error": {"code": -32601, "message": "method not found"},
+                })
+            if method == "eth_getBlockByNumber":
+                return Response({
+                    "jsonrpc": "2.0", "id": json["id"],
+                    "result": {"timestamp": "0x10", "transactions": ["0xtx"]},
+                })
+            raise AssertionError(f"Unexpected RPC method: {method}")
+
+    client = BscRpcClient(session=Session(), sleep=lambda _: None)
+    rows = client._fetch_block_range(16, 16)
+    assert len(rows) == 2
+    assert {row["event_index"] for row in rows} == {1, 2}
