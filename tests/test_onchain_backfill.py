@@ -25,14 +25,15 @@ class FakeStore:
 
 
 class FakeRoutescan:
-    def __init__(self, fail=False):
+    def __init__(self, fail=False, fail_on_call=None):
         self.calls = []
         self.fail = fail
+        self.fail_on_call = fail_on_call
 
     def _fetch_interval(self, chain, chain_id, start, end, max_pages, budget, max_requests):
         self.calls.append((int(start.timestamp()), int(end.timestamp())))
         budget[0] += 1
-        if self.fail:
+        if self.fail or self.fail_on_call == len(self.calls):
             raise RuntimeError("simulated request cap")
         return []
 
@@ -105,3 +106,22 @@ def test_bsc_backfill_advances_in_block_ranges_even_when_empty(monkeypatch):
     assert store.row["cursor_value"] == 100
     assert store.row["last_completed_from"] == 0
     assert store.row["last_completed_to"] == 99
+
+
+def test_routescan_resume_preserves_last_completed_chunk_after_later_failure(monkeypatch):
+    store = FakeStore()
+    client = FakeRoutescan(fail_on_call=2)
+    monkeypatch.setattr(onchain_backfill, "upload_transfers", lambda rows: len(rows))
+    try:
+        onchain_backfill.run_routescan_backfill(
+            "1970-01-12T13:46:40Z", "1970-01-12T13:56:40Z",
+            chunk_minutes=5, max_chunks=2, store=store, client=client,
+        )
+    except RuntimeError as exc:
+        assert "simulated request cap" in str(exc)
+    else:
+        raise AssertionError("Expected second chunk to fail")
+    assert store.row["cursor_value"] == 1000300
+    assert store.row["last_completed_from"] == 1000000
+    assert store.row["last_completed_to"] == 1000300
+    assert store.row["status"] == "paused"
