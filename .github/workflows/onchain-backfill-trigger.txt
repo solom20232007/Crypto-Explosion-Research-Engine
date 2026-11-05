@@ -1,1 +1,2 @@
 Start controlled historical on-chain backfill verification. The checkpoint is stored in Supabase; completed chunks resume from the saved cursor.
+Retry backfill after workflow expression fix.
