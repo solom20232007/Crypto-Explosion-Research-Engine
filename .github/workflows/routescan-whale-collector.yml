@@ -1,6 +1,8 @@
 name: Global EVM Transfer Collectors (Ethereum + BSC)
 
 on:
+  schedule:
+    - cron: "*/10 * * * *"
   push:
     branches:
       - research/binance-prebreakout-advisor-v1
@@ -8,10 +10,10 @@ on:
       - .github/workflows/routescan-manual-trigger.txt
   workflow_dispatch:
     inputs:
-      lookback_hours:
-        description: "Overlapping lookback window (1-24 hours)"
+      lookback_minutes:
+        description: "Overlapping incremental lookback window (1-1440 minutes)"
         required: false
-        default: "1"
+        default: "15"
         type: string
       max_pages:
         description: "Maximum Routescan pages per time window; dense windows are split"
@@ -56,16 +58,16 @@ jobs:
           BSC_RPC_URL: ${{ secrets.BSC_RPC_URL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
-          ROUTESCAN_LOOKBACK_HOURS: ${{ inputs.lookback_hours || '1' }}
+          ROUTESCAN_LOOKBACK_MINUTES: ${{ inputs.lookback_minutes || '15' }}
           ROUTESCAN_MAX_PAGES: ${{ inputs.max_pages || '50' }}
           ROUTESCAN_MAX_TOTAL_REQUESTS: ${{ inputs.max_total_requests || '1000' }}
         run: |
           set +e
           echo "=== Ethereum / Routescan ==="
-          python -m src.routescan_whale_collector --hours "${ROUTESCAN_LOOKBACK_HOURS}" --max-pages "${ROUTESCAN_MAX_PAGES}" --max-total-requests "${ROUTESCAN_MAX_TOTAL_REQUESTS}"
+          python -m src.routescan_whale_collector --minutes "${ROUTESCAN_LOOKBACK_MINUTES}" --max-pages "${ROUTESCAN_MAX_PAGES}" --max-total-requests "${ROUTESCAN_MAX_TOTAL_REQUESTS}"
           ethereum_status=$?
           echo "=== BSC / Public JSON-RPC ==="
-          python -m src.bsc_rpc_whale_collector --hours "${ROUTESCAN_LOOKBACK_HOURS}" --max-total-requests "${ROUTESCAN_MAX_TOTAL_REQUESTS}"
+          python -m src.bsc_rpc_whale_collector --minutes "${ROUTESCAN_LOOKBACK_MINUTES}" --max-total-requests "${ROUTESCAN_MAX_TOTAL_REQUESTS}"
           bsc_status=$?
           if [ "$ethereum_status" -ne 0 ] || [ "$bsc_status" -ne 0 ]; then
             echo "Collector summary: ethereum_exit=$ethereum_status bsc_exit=$bsc_status"
