@@ -374,7 +374,7 @@ def test_routescan_fetch_chain_uses_contiguous_newest_first_five_minute_slices(m
             intervals.append((start, end))
             return []
 
-    monkeypatch.setattr(collector, "BASE_INTERVAL_SECONDS", 300)
+    monkeypatch.setattr(collector, "BASE_INTERVAL_SECONDS", 60)
     client = RecordingClient(sleep=lambda _: None)
     client.fetch_chain("ethereum", 1, hours=1, max_pages=50, max_total_requests=100)
 
