@@ -156,13 +156,15 @@ def test_single_dense_block_uses_complete_receipts_instead_of_truncating(monkeyp
                 result = [sample_log("0x10", "0x1")]
             elif method == "eth_getBlockReceipts":
                 result = [{
+                    "transactionHash": "0x" + "b" * 64,
+                    "blockNumber": "0x10",
                     "logs": [
                         sample_log("0x10", "0x1"),
                         sample_log("0x10", "0x2"),
                     ]
                 }]
             elif method == "eth_getBlockByNumber":
-                result = {"timestamp": "0x10", "transactions": ["0xtx"]}
+                result = {"timestamp": "0x10", "transactions": ["0x" + "b" * 64]}
             else:
                 raise AssertionError(f"Unexpected RPC method: {method}")
             return Response({"jsonrpc": "2.0", "id": json["id"], "result": result})
@@ -235,6 +237,8 @@ def test_single_block_eth_getlogs_error_uses_complete_transaction_receipts(monke
                         "jsonrpc": "2.0",
                         "id": item["id"],
                         "result": {
+                            "transactionHash": "0x" + "b" * 64,
+                            "blockNumber": "0x10",
                             "logs": [
                                 sample_log("0x10", "0x1"),
                                 sample_log("0x10", "0x2"),
