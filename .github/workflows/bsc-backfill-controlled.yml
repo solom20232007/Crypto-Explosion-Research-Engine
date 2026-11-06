@@ -1,0 +1,44 @@
+name: BSC Controlled Backfill Resume
+
+on:
+  push:
+    branches:
+      - research/binance-prebreakout-advisor-v1
+    paths:
+      - .github/workflows/bsc-backfill-controlled.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bsc-controlled-backfill
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/binance-prebreakout-advisor-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Resume BSC from existing checkpoint (strict small budget)
+        env:
+          BSC_RPC_URL: ${{ secrets.BSC_RPC_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          python -m src.onchain_backfill \
+            --provider bsc \
+            --start-utc "2026-11-04T00:00:00Z" \
+            --chunk-blocks 50 \
+            --max-chunks 1 \
+            --max-total-requests 30
