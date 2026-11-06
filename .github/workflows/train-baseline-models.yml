@@ -1,0 +1,31 @@
+name: Train Baseline Models
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Label column (y_10_24, y_25_48, y_40_72, y_any)"
+        default: "y_10_24"
+        type: string
+permissions:
+  contents: read
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pandas numpy scikit-learn requests
+      - name: Train and evaluate
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          TARGET: ${{ inputs.target }}
+        run: python scripts/train_baseline.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: baseline-models-report
+          path: reports/baseline_models.*
+          retention-days: 30
