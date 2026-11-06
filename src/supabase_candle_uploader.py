@@ -27,6 +27,22 @@ def iso_timestamp(value: object) -> str:
     return pd.to_datetime(int(float(value)), unit="ms", utc=True).isoformat()
 
 
+def discover_files(raw_dir: Path = Path("data/raw"), symbols_file: Path = Path("data/research_symbols.txt")) -> list[Path]:
+    """Find collector output: the symbols in data/research_symbols.txt when it exists, else every *_1h.csv."""
+    if symbols_file.is_file():
+        symbols = [line.strip().upper() for line in symbols_file.read_text().splitlines() if line.strip()]
+        candidates = [raw_dir / f"{symbol}_1h.csv" for symbol in symbols]
+        files = [path for path in candidates if path.is_file()]
+        missing = [path.name for path in candidates if not path.is_file()]
+        if missing:
+            print(f"[WARN] No collector output for {len(missing)} of {len(candidates)} symbols (not listed or no data in range): {missing}")
+    else:
+        files = sorted(raw_dir.glob("*_1h.csv"))
+    if not files:
+        raise FileNotFoundError(f"No *_1h.csv collector output found in {raw_dir}")
+    return files
+
+
 def upload_file(path: Path, session: requests.Session, endpoint: str, headers: dict) -> int:
     symbol = path.name.removesuffix("_1h.csv").upper()
     frame = pd.read_csv(path)
@@ -79,10 +95,7 @@ def main() -> None:
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
-    files = [Path(f"data/raw/{symbol}_1h.csv") for symbol in ("BTCUSDT", "ETHUSDT", "SOLUSDT")]
-    missing = [str(path) for path in files if not path.is_file()]
-    if missing:
-        raise FileNotFoundError(f"Expected collector output files not found: {missing}")
+    files = discover_files()
     total = 0
     with requests.Session() as session:
         for path in files:
