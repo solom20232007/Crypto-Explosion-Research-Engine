@@ -21,7 +21,7 @@ import requests
 BASE_URL = "https://api.routescan.io/v2/network/mainnet/evm"
 PROVIDER = "routescan_v2"
 PAGE_SIZE = 100
-BASE_INTERVAL_SECONDS = 60  # One-minute slices reduce pagination overflow on dense Ethereum periods.
+BASE_INTERVAL_SECONDS = 900  # Start with 15-minute windows; recursively split only dense windows.
 DEFAULT_MAX_TOTAL_REQUESTS_PER_CHAIN = 300
 DEFAULT_CHAINS = {"ethereum": 1}
 
