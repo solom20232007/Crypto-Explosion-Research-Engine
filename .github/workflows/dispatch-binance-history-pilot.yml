@@ -86,5 +86,6 @@ jobs:
           path: |
             reports/
             data/research_symbols.txt
+            data/raw/*_1h.csv
           if-no-files-found: warn
           retention-days: 14
