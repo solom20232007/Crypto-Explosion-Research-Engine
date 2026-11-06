@@ -1,3 +1,2 @@
-Start controlled historical on-chain backfill verification. The checkpoint is stored in Supabase; completed chunks resume from the saved cursor.
-Retry backfill after workflow expression fix.
-Restart with chronological sub-interval checkpoints and smaller bounded windows.
+Resume checkpointed historical on-chain backfill from the last completed Ethereum and BSC intervals.
+Do not reset the Supabase checkpoints; keep the existing bounded request budgets.
