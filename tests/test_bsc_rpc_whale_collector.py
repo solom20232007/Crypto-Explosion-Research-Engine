@@ -261,7 +261,7 @@ def test_single_block_eth_getlogs_error_uses_complete_transaction_receipts(monke
             if method == "eth_getBlockByNumber":
                 return Response({
                     "jsonrpc": "2.0", "id": json["id"],
-                    "result": {"timestamp": "0x10", "transactions": ["0xtx"]},
+                    "result": {"timestamp": "0x10", "transactions": ["0x" + "b" * 64]},
                 })
             raise AssertionError(f"Unexpected RPC method: {method}")
 
