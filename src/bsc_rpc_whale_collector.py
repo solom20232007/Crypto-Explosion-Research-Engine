@@ -20,6 +20,7 @@ PROVIDER = "bsc_public_rpc"
 CHAIN = "bsc"
 TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 MAX_LOGS_PER_INTERVAL = 2000
+RECEIPT_BATCH_SIZE = 100
 DEFAULT_MAX_TOTAL_REQUESTS = 1000
 
 
@@ -223,13 +224,14 @@ class BscRpcClient:
                         raise RuntimeError("eth_getBlockReceipts returned a non-list result")
                 except RuntimeError:
                     receipts = []
-                    for offset in range(0, len(transactions), 50):
-                        hashes = transactions[offset:offset + 50]
+                    for offset in range(0, len(transactions), RECEIPT_BATCH_SIZE):
+                        hashes = transactions[offset:offset + RECEIPT_BATCH_SIZE]
                         calls = [("eth_getTransactionReceipt", [tx_hash]) for tx_hash in hashes]
                         receipts.extend(self._rpc_batch(calls))
 
                 expected_hashes = {str(tx_hash).lower() for tx_hash in transactions}
                 receipt_hashes = []
+                seen_receipt_hashes = set()
                 if len(receipts) != len(transactions) or any(
                     not isinstance(receipt, dict) for receipt in receipts
                 ):
@@ -242,9 +244,10 @@ class BscRpcClient:
                     receipt_hash = str(receipt.get("transactionHash") or "").lower()
                     if not receipt_hash or receipt_hash not in expected_hashes:
                         raise RuntimeError("receipt coverage mismatch: missing or unexpected transactionHash")
-                    receipt_hashes.append(receipt_hash)
-                    if receipt_hashes.count(receipt_hash) > 1:
+                    if receipt_hash in seen_receipt_hashes:
                         raise RuntimeError("receipt coverage mismatch: duplicate transaction receipt")
+                    seen_receipt_hashes.add(receipt_hash)
+                    receipt_hashes.append(receipt_hash)
                     if "blockNumber" not in receipt or self._hex_int(receipt["blockNumber"]) != start_block:
                         raise RuntimeError("receipt coverage mismatch: receipt belongs to a different block")
                     if not isinstance(receipt.get("logs"), list):
