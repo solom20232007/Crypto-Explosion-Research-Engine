@@ -269,3 +269,59 @@ def test_single_block_eth_getlogs_error_uses_complete_transaction_receipts(monke
     rows = client._fetch_block_range(16, 16)
     assert len(rows) == 2
     assert {row["event_index"] for row in rows} == {1, 2}
+
+
+
+def test_dense_block_receipt_fallback_uses_larger_complete_batches():
+    tx_hashes = ["0x" + format(index, "064x") for index in range(101)]
+    batch_sizes = []
+
+    class Response:
+        status_code = 200
+        text = ""
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        def json(self):
+            return self.payload
+
+    class Session:
+        def post(self, url, json, timeout):
+            if isinstance(json, list):
+                batch_sizes.append(len(json))
+                return Response([
+                    {
+                        "jsonrpc": "2.0",
+                        "id": item["id"],
+                        "result": {
+                            "transactionHash": item["params"][0],
+                            "blockNumber": "0x10",
+                            "logs": [],
+                        },
+                    }
+                    for item in json
+                ])
+            method = json["method"]
+            if method == "eth_getLogs":
+                return Response({
+                    "jsonrpc": "2.0", "id": json["id"],
+                    "error": {"code": -32005, "message": "query returned more than 2000 results"},
+                })
+            if method == "eth_getBlockReceipts":
+                return Response({
+                    "jsonrpc": "2.0", "id": json["id"],
+                    "error": {"code": -32601, "message": "method not found"},
+                })
+            if method == "eth_getBlockByNumber":
+                return Response({
+                    "jsonrpc": "2.0", "id": json["id"],
+                    "result": {"timestamp": "0x10", "transactions": tx_hashes},
+                })
+            raise AssertionError(f"Unexpected RPC method: {method}")
+
+    client = BscRpcClient(session=Session(), sleep=lambda _: None)
+    rows = client._fetch_block_range(16, 16)
+    assert rows == []
+    assert batch_sizes == [100, 1]
+    assert client.request_count == 4
