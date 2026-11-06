@@ -324,4 +324,4 @@ def test_dense_block_receipt_fallback_uses_larger_complete_batches():
     rows = client._fetch_block_range(16, 16)
     assert rows == []
     assert batch_sizes == [100, 1]
-    assert client.request_count == 4
+    assert client.request_count == 5
