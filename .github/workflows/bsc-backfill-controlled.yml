@@ -41,4 +41,4 @@ jobs:
             --start-utc "2026-11-04T00:00:00Z" \
             --chunk-blocks 50 \
             --max-chunks 1 \
-            --max-total-requests 30
+            --max-total-requests 200
