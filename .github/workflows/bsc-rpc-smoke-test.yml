@@ -98,6 +98,26 @@ jobs:
           except Exception as exc:
               print(json.dumps({"probe": "eth_getBlockReceipts", "supported": False,
                                 "reason": str(exc)[:500]}))
+          target_number = 131525577
+          target_hex = hex(target_number)
+          target_block = rpc("eth_getBlockByNumber", [target_hex, False])
+          target_txs = target_block.get("transactions") if isinstance(target_block, dict) else None
+          print(json.dumps({"probe": "historical_dense_block",
+                            "block_number": target_number,
+                            "transaction_count": len(target_txs) if isinstance(target_txs, list) else None}))
+          try:
+              target_receipts = rpc("eth_getBlockReceipts", [target_hex])
+              expected = {str(tx).lower() for tx in target_txs} if isinstance(target_txs, list) else set()
+              actual = {str(x.get("transactionHash", "")).lower() for x in target_receipts if isinstance(x, dict)} if isinstance(target_receipts, list) else set()
+              complete = isinstance(target_receipts, list) and len(target_receipts) == len(expected) and actual == expected
+              print(json.dumps({"probe": "historical_eth_getBlockReceipts",
+                                "supported": isinstance(target_receipts, list),
+                                "receipt_count": len(target_receipts) if isinstance(target_receipts, list) else None,
+                                "expected_transactions": len(expected),
+                                "complete_coverage": complete}))
+          except Exception as exc:
+              print(json.dumps({"probe": "historical_eth_getBlockReceipts",
+                                "supported": False, "reason": str(exc)[:500]}))
           print(json.dumps({"probe": "summary", "http_posts": counter,
                             "note": "HTTP post count is not proof of provider billing units."}))
           PY
