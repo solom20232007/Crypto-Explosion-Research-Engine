@@ -228,6 +228,8 @@ class BscRpcClient:
                         calls = [("eth_getTransactionReceipt", [tx_hash]) for tx_hash in hashes]
                         receipts.extend(self._rpc_batch(calls))
 
+                expected_hashes = {str(tx_hash).lower() for tx_hash in transactions}
+                receipt_hashes = []
                 if len(receipts) != len(transactions) or any(
                     not isinstance(receipt, dict) for receipt in receipts
                 ):
@@ -237,12 +239,24 @@ class BscRpcClient:
                     )
                 receipt_logs = []
                 for receipt in receipts:
+                    receipt_hash = str(receipt.get("transactionHash") or "").lower()
+                    if not receipt_hash or receipt_hash not in expected_hashes:
+                        raise RuntimeError("receipt coverage mismatch: missing or unexpected transactionHash")
+                    receipt_hashes.append(receipt_hash)
+                    if receipt_hashes.count(receipt_hash) > 1:
+                        raise RuntimeError("receipt coverage mismatch: duplicate transaction receipt")
+                    if "blockNumber" not in receipt or self._hex_int(receipt["blockNumber"]) != start_block:
+                        raise RuntimeError("receipt coverage mismatch: receipt belongs to a different block")
                     if not isinstance(receipt.get("logs"), list):
                         raise RuntimeError("a transaction receipt omitted its logs array")
                     for item in receipt["logs"]:
                         topics = item.get("topics") or []
                         if topics and str(topics[0]).lower() == TRANSFER_TOPIC:
+                            if self._hex_int(item.get("blockNumber", -1)) != start_block:
+                                raise RuntimeError("receipt coverage mismatch: log belongs to a different block")
                             receipt_logs.append(item)
+                if set(receipt_hashes) != expected_hashes:
+                    raise RuntimeError("receipt coverage mismatch: one or more transaction receipts are missing")
                 logs = receipt_logs
                 receipt_block_timestamp = self._hex_int(block["timestamp"])
                 receipts_complete = True
