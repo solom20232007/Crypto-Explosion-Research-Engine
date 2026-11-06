@@ -92,3 +92,4 @@ def main():
             t = r["top5pct"]; lines.append(f"| {k} | {seg} | {r['auc']:.3f} | {r['pr_auc']:.3f} | {r['base_rate']:.3f} | {t['lift']:.2f} | {t['precision']:.3f} | {t['episodes_caught']}/{t['episodes_in_test']} | {t['median_lead_hours']} |")
     Path("reports/baseline_models.md").write_text("\n".join(lines))
 main()
+print(Path("reports/baseline_models.md").read_text())
