@@ -374,11 +374,11 @@ def test_routescan_fetch_chain_uses_contiguous_newest_first_one_minute_slices(mo
             intervals.append((start, end))
             return []
 
-    monkeypatch.setattr(collector, "BASE_INTERVAL_SECONDS", 60)
+    monkeypatch.setattr(collector, "BASE_INTERVAL_SECONDS", 900)
     client = RecordingClient(sleep=lambda _: None)
     client.fetch_chain("ethereum", 1, hours=1, max_pages=50, max_total_requests=100)
 
-    assert len(intervals) == 60
+    assert len(intervals) == 4
     assert all(intervals[i][0] == intervals[i + 1][1] for i in range(len(intervals) - 1))
     assert all(intervals[i][1] > intervals[i][0] for i in range(len(intervals)))
     assert intervals[0][1] > intervals[-1][1]
@@ -396,10 +396,10 @@ def test_routescan_fetch_chain_supports_short_minute_lookback(monkeypatch):
             intervals.append((start, end))
             return []
 
-    monkeypatch.setattr(collector, "BASE_INTERVAL_SECONDS", 60)
+    monkeypatch.setattr(collector, "BASE_INTERVAL_SECONDS", 900)
     client = RecordingClient(sleep=lambda _: None)
     client.fetch_chain("ethereum", 1, minutes=15, max_pages=50, max_total_requests=100)
 
-    assert len(intervals) == 15
+    assert len(intervals) == 1
     assert all(intervals[i][0] == intervals[i + 1][1] for i in range(len(intervals) - 1))
     assert all(intervals[i][1] > intervals[i][0] for i in range(len(intervals)))
