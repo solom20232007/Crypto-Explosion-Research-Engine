@@ -67,7 +67,7 @@ def main():
                 a0 = roc_auc_score(y, s["base"][mask], sample_weight=w); a1 = roc_auc_score(y, s["fut"][mask], sample_weight=w)
                 groups = sub.groupby("cluster").indices; keys = list(groups); diffs = []
                 for _ in range(150):
-                    idx = np.concatenate([groups[k] for k in rng.choice(len(keys), len(keys))])
+                    idx = np.concatenate([groups[keys[i]] for i in rng.choice(len(keys), len(keys))])
                     yy = y[idx]
                     if yy.min() == yy.max(): continue
                     diffs.append(roc_auc_score(yy, s["fut"][mask][idx], sample_weight=w[idx]) - roc_auc_score(yy, s["base"][mask][idx], sample_weight=w[idx]))
