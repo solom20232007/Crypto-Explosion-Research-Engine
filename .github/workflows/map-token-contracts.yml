@@ -1,0 +1,25 @@
+name: Map Token Contracts
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/binance-prebreakout-advisor-v1
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main_scripts
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python main_scripts/scripts/map_token_contracts.py
