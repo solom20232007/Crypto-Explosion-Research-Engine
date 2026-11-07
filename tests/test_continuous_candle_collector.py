@@ -56,3 +56,17 @@ def test_hourly_collector_requires_supabase_credentials(monkeypatch):
     monkeypatch.delenv("SUPABASE_SECRET_KEY", raising=False)
     with pytest.raises(RuntimeError, match="SUPABASE_URL"):
         collector.collect_hourly_candles(now=now, upload=True, pause_seconds=0)
+
+
+def test_restrict_to_symbols_file(tmp_path, capsys):
+    from src.continuous_candle_collector import restrict_to_symbols_file
+
+    f = tmp_path / "s.txt"
+    f.write_text("# comment\nBTCUSDT\nfooUSDT  # inline\n\nGONEUSDT\n", encoding="utf-8")
+    assert restrict_to_symbols_file({"BTCUSDT", "FOOUSDT", "BARUSDT"}, f) == {"BTCUSDT", "FOOUSDT"}
+    assert "GONEUSDT" in capsys.readouterr().out
+    empty = tmp_path / "e.txt"
+    empty.write_text("# nothing\n", encoding="utf-8")
+    import pytest
+    with pytest.raises(ValueError):
+        restrict_to_symbols_file({"BTCUSDT"}, empty)
