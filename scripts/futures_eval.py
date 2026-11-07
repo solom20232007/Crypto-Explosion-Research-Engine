@@ -31,6 +31,7 @@ def futures():
     f["oi_chg_3d"] = f.groupby("symbol").oi_value_end.pct_change(3)
     f["funding_sum3"] = f.groupby("symbol").funding_sum.transform(lambda s: s.rolling(3, min_periods=2).sum())
     f["day"] = f["day"] + pd.Timedelta(days=1)  # available from the next UTC day -> join on the decision day
+    f[FUT] = f[FUT].replace([np.inf, -np.inf], np.nan).clip(-1e3, 1e3)
     return f[["symbol", "day"] + FUT]
 
 def model(kind):
@@ -48,6 +49,7 @@ def main():
     for c in ["y_10_24", "y_25_48", "y_40_72", "y_any", "market_wide", "in_cooldown"]: df[c] = df[c].astype(int)
     df["day"] = df.open_time.dt.floor("D")
     df = df.merge(futures(), on=["symbol", "day"], how="left")
+    df[tb.BASE] = df[tb.BASE].replace([np.inf, -np.inf], np.nan)
     df = df.dropna(subset=["oi_chg_1d", "rel_rv24"]).reset_index(drop=True)
     print("rows with futures context", len(df), "symbols", df.symbol.nunique())
     split = df.open_time.quantile(0.7); tr = df[df.open_time < split - pd.Timedelta(hours=72)]; te = df[df.open_time >= split].copy()
