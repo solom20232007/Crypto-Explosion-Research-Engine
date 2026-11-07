@@ -39,8 +39,16 @@ def _fit(d, t):
     m = make_pipeline(SimpleImputer(strategy="median"), StandardScaler(), LogisticRegression(C=0.1, max_iter=2000))
     m.fit(d[BASE], d[t].astype(int), logisticregression__sample_weight=d.sample_weight); return m
 
+SRC = "?"
+
 def train():
-    df = fetch_all("prebreakout_samples_v1", "symbol,open_time,sample_weight," + ",".join(TARGETS + BASE), "symbol,open_time")
+    global SRC
+    df = fetch_all("history_daily_v1", "symbol,open_time,already_moved," + ",".join(TARGETS + BASE), "symbol,open_time")  # 3y of true-prevalence 00:00 UTC rows
+    if len(df) > 20000:
+        df = df[~df.already_moved.astype(bool)].copy(); df["sample_weight"] = 1.0; src = "history_daily_v1"
+    else:  # fallback: legacy 1y weighted hourly samples
+        df = fetch_all("prebreakout_samples_v1", "symbol,open_time,sample_weight," + ",".join(TARGETS + BASE), "symbol,open_time"); src = "prebreakout_samples_v1"
+    SRC = src; print("training source:", src, len(df), "rows")
     for c in BASE + ["sample_weight"]: df[c] = pd.to_numeric(df[c], errors="coerce")
     df["open_time"] = pd.to_datetime(df.open_time, utc=True)
     split = df.open_time.quantile(0.7)
@@ -114,7 +122,7 @@ def main():
     cols = ["symbol","rank","raw_10_24","score_10_24","score_25_48","score_40_72","already_moved","btc_ret_24h","breadth_24h","pump_count_24h",
             "ret_24h","ret_72h","rv24","range_24h","vol_ratio_24","vol_compression","close_vs_sma20","dist_from_high_168","dist_from_low_168"]
     out = top[cols].copy(); out["bar_time"] = bar.isoformat(); out["market_wide"] = market_wide
-    out["model"] = f"logistic_base_v2_isotonic; samples_through={last_train[:10]}"
+    out["model"] = f"logistic_base_v3_isotonic; source={SRC}; samples_through={last_train[:10]}"
     payload = json.loads(out.to_json(orient="records"))
     r = requests.post(f"{URL}/rest/v1/daily_recommendations_v1?on_conflict=bar_time,symbol",
                       headers={**H, "Content-Type": "application/json", "Prefer": "resolution=merge-duplicates"}, data=json.dumps(payload), timeout=120)
