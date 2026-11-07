@@ -1,0 +1,24 @@
+name: Weekly Performance Report
+on:
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install pandas requests tabulate
+      - env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/weekly_report.py | tee report.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "تقرير الأداء الأسبوعي $(date -u +%F)" --body-file report.md
