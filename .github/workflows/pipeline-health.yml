@@ -17,9 +17,10 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: |
-          curl -sS --fail-with-body -X POST "$SUPABASE_URL/rest/v1/rpc/run_pipeline_health" \
+          code=$(curl -sS -o health.json -w '%{http_code}' -X POST "$SUPABASE_URL/rest/v1/rpc/run_pipeline_health" \
             -H "apikey: $SUPABASE_SECRET_KEY" -H "Authorization: Bearer $SUPABASE_SECRET_KEY" \
-            -H "Content-Type: application/json" -d '{}' > health.json
+            -H "Content-Type: application/json" -d '{}')
+          if [ "$code" != "200" ]; then echo "HTTP $code"; cat health.json; echo; exit 1; fi
           jq -r '.[] | "\(.status | ascii_upcase)\t\(.check_name)\t\(.detail)"' health.json
           jq -r '.[] | select(.status=="warn") | "::warning title=\(.check_name)::\(.detail)"' health.json
           jq -r '.[] | select(.status=="fail") | "::error title=\(.check_name)::\(.detail)"' health.json
