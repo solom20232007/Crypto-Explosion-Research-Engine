@@ -1,0 +1,25 @@
+name: History 3y Eval
+on:
+  workflow_dispatch:
+    inputs:
+      start_month: {default: "2023-10", type: string}
+      end_month: {default: "2026-10", type: string}
+permissions:
+  contents: read
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install pandas numpy scikit-learn requests
+      - env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          START_MONTH: ${{ inputs.start_month }}
+          END_MONTH: ${{ inputs.end_month }}
+        run: python scripts/history_3y_eval.py
+      - uses: actions/upload-artifact@v4
+        with: {name: history-daily, path: history_daily.csv.gz}
