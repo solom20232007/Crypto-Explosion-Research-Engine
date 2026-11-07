@@ -1,0 +1,43 @@
+name: Pipeline Health Check
+on:
+  schedule:
+    - cron: "15 */3 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Run health checks in Supabase
+        id: health
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          curl -sS --fail-with-body -X POST "$SUPABASE_URL/rest/v1/rpc/run_pipeline_health" \
+            -H "apikey: $SUPABASE_SECRET_KEY" -H "Authorization: Bearer $SUPABASE_SECRET_KEY" \
+            -H "Content-Type: application/json" -d '{}' > health.json
+          jq -r '.[] | "\(.status | ascii_upcase)\t\(.check_name)\t\(.detail)"' health.json
+          jq -r '.[] | select(.status=="warn") | "::warning title=\(.check_name)::\(.detail)"' health.json
+          jq -r '.[] | select(.status=="fail") | "::error title=\(.check_name)::\(.detail)"' health.json
+          {
+            echo "failures<<EOF"
+            jq -r '.[] | select(.status=="fail") | "- **\(.check_name)**: \(.detail)"' health.json
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - name: Open or update an alert issue when a check fails
+        if: steps.health.outputs.failures != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FAILURES: ${{ steps.health.outputs.failures }}
+        run: |
+          title="Pipeline health alert"
+          n=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$title in:title" --json number --jq '.[0].number // empty')
+          body="Failed checks at $(date -u +%Y-%m-%dT%H:%MZ):"$'\n\n'"$FAILURES"$'\n\n'"Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ -n "$n" ]; then gh issue comment "$n" --repo "$GITHUB_REPOSITORY" --body "$body"; else gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"; fi
+      - name: Fail the job when any check failed
+        if: steps.health.outputs.failures != ''
+        run: exit 1
