@@ -134,3 +134,14 @@ def test_stale_published_articles_are_excluded_even_when_recently_discovered():
 def test_major_coin_aliases_match_project_names():
  aliases={"BTC":["Bitcoin"],"ETH":["Ethereum"],"SOL":["Solana"]}
  assert match_symbols("Bitcoin and Solana market update",["BTCUSDT","ETHUSDT","SOLUSDT"],aliases)==["BTCUSDT","SOLUSDT"]
+
+
+def test_cashtag_only_tickers_do_not_match_plain_words():
+    from src.news_monitor import match_symbols
+
+    aliases = {"ONE": [{"ticker": "cashtag_only", "aliases": ["Harmony ONE"]}], "TAO": ["Bittensor"]}
+    syms = ["ONEUSDT", "TAOUSDT"]
+    assert match_symbols("One of the largest funds bought more", syms, aliases) == []
+    assert match_symbols("Traders eye $ONE after listing", syms, aliases) == ["ONEUSDT"]
+    assert match_symbols("Harmony ONE bridge update", syms, aliases) == ["ONEUSDT"]
+    assert match_symbols("Bittensor rallies; TAO up", syms, aliases) == ["TAOUSDT"]

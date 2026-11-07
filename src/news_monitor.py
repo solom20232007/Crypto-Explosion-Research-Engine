@@ -66,23 +66,29 @@ def classify(text):
  return "|".join(cats) if cats else "general",score
 
 def _terms_for_symbol(symbol,aliases):
+ """Return (terms, cashtag_only). Ambiguous tickers (ONE, RED, BANK...) are matched only as $TICKER."""
  base=symbol[:-4] if symbol.endswith("USDT") else symbol
  values=aliases.get(base,[])
- if isinstance(values,str): values=[values]
- terms={base}
+ if isinstance(values,(str,dict)): values=[values]
+ terms=set(); cashtag_only=False
  for value in values:
   if isinstance(value,dict):
+   if value.get("ticker")=="cashtag_only": cashtag_only=True
    terms.update(str(x).upper() for x in value.get("aliases",[]) if x)
    if value.get("name"): terms.add(str(value["name"]).upper())
   else: terms.add(str(value).upper())
- return {x.strip() for x in terms if len(x.strip())>=3}
+ if not cashtag_only: terms.add(base)
+ return {x.strip() for x in terms if len(x.strip())>=3},cashtag_only
 
 def match_symbols(text,symbols,aliases=None):
  aliases=aliases or {}; upper=text.upper(); found=[]
  for symbol in symbols:
-  for term in _terms_for_symbol(symbol,aliases):
-   if re.search(r"(?<![A-Z0-9])\$?"+re.escape(term)+r"(?![A-Z0-9])",upper):
-    found.append(symbol); break
+  terms,cashtag_only=_terms_for_symbol(symbol,aliases)
+  base=symbol[:-4] if symbol.endswith("USDT") else symbol
+  hit=any(re.search(r"(?<![A-Z0-9])\$?"+re.escape(term)+r"(?![A-Z0-9])",upper) for term in terms)
+  if not hit and cashtag_only:
+   hit=bool(re.search(r"(?<![A-Z0-9])\$"+re.escape(base.upper())+r"(?![A-Z0-9])",upper))
+  if hit: found.append(symbol)
  return found
 
 def deduplicate_articles(news):
