@@ -1,9 +1,12 @@
 name: History 3y Eval
 on:
+  schedule:
+    - cron: "30 3 3 * *"
   workflow_dispatch:
     inputs:
       start_month: {default: "2023-10", type: string}
-      end_month: {default: "2026-10", type: string}
+      end_month: {default: "", type: string}
+      upload: {default: "1", type: string}
 permissions:
   contents: read
 jobs:
@@ -20,6 +23,7 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           START_MONTH: ${{ inputs.start_month }}
           END_MONTH: ${{ inputs.end_month }}
+          UPLOAD: ${{ inputs.upload || '1' }}
         run: python scripts/history_3y_eval.py
       - uses: actions/upload-artifact@v4
         with: {name: history-daily, path: history_daily.csv.gz}
