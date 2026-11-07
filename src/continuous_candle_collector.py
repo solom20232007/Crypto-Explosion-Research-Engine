@@ -25,12 +25,28 @@ def _utc(value):
     return ts
 
 
+def restrict_to_symbols_file(available, symbols_file):
+    """Keep only symbols listed in the file (one per line, '#' comments allowed) that Binance still trades."""
+    wanted = {
+        line.split("#")[0].strip().upper()
+        for line in Path(symbols_file).read_text(encoding="utf-8").splitlines()
+        if line.split("#")[0].strip()
+    }
+    if not wanted:
+        raise ValueError(f"{symbols_file} lists no symbols")
+    missing = sorted(wanted - set(available))
+    if missing:
+        print(json.dumps({"warning": "listed symbols not tradable on Binance Spot", "symbols": missing}))
+    return wanted & set(available)
+
+
 def collect_hourly_candles(
     *,
     supabase_url=None,
     secret_key=None,
     lookback_hours=72,
     max_symbols=None,
+    symbols_file=None,
     pause_seconds=0.08,
     now=None,
     upload=True,
@@ -75,6 +91,8 @@ def collect_hourly_candles(
             universe.discard(symbol)
         if any(tag in base for tag in ("2L", "2S", "3L", "3S", "5L", "5S")):
             universe.discard(symbol)
+    if symbols_file:
+        universe = restrict_to_symbols_file(universe | set(by_symbol), symbols_file)
     symbols = sorted(universe)
     if max_symbols is not None:
         symbols = symbols[: int(max_symbols)]
@@ -166,12 +184,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lookback-hours", type=int, default=72)
     parser.add_argument("--max-symbols", type=int, default=None)
+    parser.add_argument("--symbols-file", default=None, help="Restrict collection to the symbols listed in this file")
     parser.add_argument("--output-dir", default="reports/continuous_candles")
     parser.add_argument("--no-upload", action="store_true")
     args = parser.parse_args()
     collect_hourly_candles(
         lookback_hours=args.lookback_hours,
         max_symbols=args.max_symbols,
+        symbols_file=args.symbols_file,
         upload=not args.no_upload,
         output_dir=args.output_dir,
     )
