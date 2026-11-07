@@ -58,7 +58,7 @@ jobs:
         run: |
           args=(--lookback-hours "$LOOKBACK_HOURS")
           if [ -n "$MAX_SYMBOLS" ]; then args+=(--max-symbols "$MAX_SYMBOLS"); fi
-          python -m src.continuous_candle_collector "${args[@]}"
+          python -m src.continuous_candle_collector --symbols-file config/research_symbols.txt "${args[@]}"
       - name: Upload collection report
         uses: actions/upload-artifact@v4
         with:
