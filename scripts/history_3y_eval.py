@@ -22,7 +22,7 @@ SKIP = {"BTCUSDT","ETHUSDT","SOLUSDT","EURIUSDT","WBETHUSDT","WBTCUSDT"}
 ARCH = "https://data.binance.vision/data/spot/monthly/klines/{s}/1h/{s}-1h-{m}.zip"
 
 def universe():
-    r = requests.get(f"{URL}/rest/v1/prebreakout_samples_v1", headers=H, params={"select": "symbol", "open_time": "eq.2026-10-01T00:00:00+00:00", "limit": "500"}, timeout=60)
+    r = requests.get(f"{URL}/rest/v1/candles", headers=H, params={"select": "symbol", "timeframe": "eq.1h", "open_time": "eq.2026-10-15T00:00:00+00:00", "limit": "1000"}, timeout=60)
     r.raise_for_status(); return sorted({x["symbol"] for x in r.json()} | {"BTCUSDT"})
 
 def month_file(a):
