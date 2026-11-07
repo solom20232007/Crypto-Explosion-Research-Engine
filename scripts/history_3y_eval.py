@@ -14,7 +14,7 @@ from sklearn.preprocessing import StandardScaler
 
 URL = os.environ["SUPABASE_URL"].rstrip("/"); KEY = os.environ["SUPABASE_SECRET_KEY"]
 H = {"apikey": KEY, "Authorization": f"Bearer {KEY}"}
-START = os.environ.get("START_MONTH", "2023-10"); END = os.environ.get("END_MONTH", "2026-10")
+START = os.environ.get("START_MONTH", "2023-10"); END = os.environ.get("END_MONTH") or str(pd.Period(pd.Timestamp.utcnow().strftime("%Y-%m"), "M") - 1)
 BASE = ["ret_1h","ret_3h","ret_6h","ret_12h","ret_24h","ret_48h","ret_72h","ret_168h","vol_ratio_24","vol_ratio_168",
         "range_24h","range_168h","rv24","rv168","vol_compression","close_vs_sma20","close_vs_sma50","dist_from_high_168",
         "dist_from_low_168","btc_ret_24h","btc_ret_72h","breadth_24h","pump_count_24h","hour_utc","dow"]
@@ -82,6 +82,15 @@ def main():
     d = allf.dropna(subset=BASE + ["fwd_y_40_72"]).copy()
     d = d[d.qv24 > 0]; d["ym"] = d.open_time.dt.to_period("M").astype(str)
     d.to_csv("history_daily.csv.gz", index=False)
+    if os.environ.get("UPLOAD") == "1":
+        cols = ["symbol", "open_time"] + BASE + ["y_10_24", "y_25_48", "y_40_72", "already_moved", "market_wide"]
+        u = d[cols].copy(); u["open_time"] = u.open_time.dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+        u["pump_count_24h"] = u.pump_count_24h.astype(int); u["hour_utc"] = u.hour_utc.astype(int); u["dow"] = u.dow.astype(int)
+        u = u.astype(object).where(u.notna(), None); rows = json.loads(u.to_json(orient="records"))
+        hh = {**H, "Content-Type": "application/json", "Prefer": "resolution=merge-duplicates"}
+        for i in range(0, len(rows), 1000):
+            requests.post(f"{URL}/rest/v1/history_daily_v1?on_conflict=symbol,open_time", headers=hh, data=json.dumps(rows[i:i + 1000]), timeout=120).raise_for_status()
+        print("uploaded", len(rows))
     print("rows", len(d), "symbols", d.symbol.nunique(), d.open_time.min(), d.open_time.max())
     d = d[~d.already_moved]
     print("\nBase rates by year-block (not already moved):")
