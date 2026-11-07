@@ -35,7 +35,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           ROUTESCAN_API_KEY: ${{ secrets.ROUTESCAN_API_KEY }}
-          HOURS: ${{ inputs.hours || '3' }}
+          HOURS: ${{ inputs.hours || '12' }}
           START_ISO: ${{ inputs.start }}
           END_ISO: ${{ inputs.end }}
         run: python scripts/onchain_pilot.py

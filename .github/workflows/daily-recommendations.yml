@@ -11,10 +11,23 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout collector code (research branch)
+        uses: actions/checkout@v4
+        with:
+          ref: research/binance-prebreakout-advisor-v1
+          path: research
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: pip install pandas numpy scikit-learn requests
+      - name: Top up candles first (GitHub cron is best effort; the hourly collector may be late)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        working-directory: research
+        run: |
+          pip install -r requirements.txt
+          python -m src.continuous_candle_collector --symbols-file config/research_symbols.txt --lookback-hours 12 --output-dir /tmp/candle_topup
       - name: Score latest 00:00 UTC bar and publish
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
