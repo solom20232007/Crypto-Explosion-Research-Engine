@@ -107,7 +107,9 @@ def main():
         raw = m.predict_proba(d[BASE])[:, 1]; d["score_" + t[2:]] = cals[t].predict(raw)
         if t == "y_10_24": d["raw_10_24"] = raw
     d["already_moved"] = (d.ret_24h >= 0.10) | (d.ret_48h >= 0.25) | (d.ret_72h >= 0.40)
-    d = d.sort_values("raw_10_24", ascending=False).reset_index(drop=True); d["rank"] = d.index + 1
+    n_moved = int(d.already_moved.sum())
+    d = d[~d.already_moved].sort_values("raw_10_24", ascending=False).reset_index(drop=True); d["rank"] = d.index + 1  # training excluded already-moved rows
+    print(f"excluded {n_moved} symbols that already moved (+10%/24h, +25%/48h or +40%/72h) - outside the model's training domain")
     top = d.head(TOP_N)
     cols = ["symbol","rank","raw_10_24","score_10_24","score_25_48","score_40_72","already_moved","btc_ret_24h","breadth_24h","pump_count_24h",
             "ret_24h","ret_72h","rv24","range_24h","vol_ratio_24","vol_compression","close_vs_sma20","dist_from_high_168","dist_from_low_168"]
