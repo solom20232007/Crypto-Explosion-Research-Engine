@@ -32,5 +32,11 @@ def main():
     w = w[[c for c in wcols if c in w.columns]].dropna(subset=["logged_time_utc", "symbol"]).drop_duplicates(["logged_time_utc", "symbol"])
     if "is_wash" in w: w["is_wash"] = w["is_wash"].astype(float).astype(bool)
     n2 = upsert("v6_watch_v1", "logged_time_utc,symbol", w)
-    print(json.dumps({"v6_signals": n1, "v6_watch": n2, "branch": BRANCH}))
+    # Shariah/halal base list maintained by V6 (third-party dataset; not independently verified by this project)
+    r = requests.get(RAW.format(branch=BRANCH, path="shariah_compliant_bases_v6.json"), timeout=60); r.raise_for_status()
+    j = r.json()
+    hal = pd.DataFrame({"base": sorted({str(x).upper() for x in j.get("symbols", [])})})
+    hal["list_updated_at"] = j.get("updated_at_utc"); hal["source"] = j.get("source")
+    n3 = upsert("v6_shariah_bases_v1", "base", hal) if len(hal) else 0
+    print(json.dumps({"v6_signals": n1, "v6_watch": n2, "shariah_bases": n3, "branch": BRANCH}))
 main()
