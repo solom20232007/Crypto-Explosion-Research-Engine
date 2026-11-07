@@ -37,49 +37,72 @@ def post(table, rows, conflict):
         r = requests.post(f"{URL}/rest/v1/{table}?on_conflict={conflict}", headers={**SB, "Content-Type": "application/json", "Prefer": "resolution=merge-duplicates"},
                           data=json.dumps(rows[i:i + 500]), timeout=120); r.raise_for_status()
 
+def fetch_interval(base, token, start, end, depth=0):
+    """Fetch all transfers for one token in [start, end). Splits the interval when the page cap is hit.
+    Returns (items, complete)."""
+    iso = lambda d: d.strftime("%Y-%m-%dT%H:%M:%SZ")
+    params = {"tokenAddress": token, "timestampFrom": iso(start), "timestampTo": iso(end), "sort": "desc", "limit": 100}
+    items, cur = [], None
+    for _ in range(MAX_PAGES):
+        if cur: params["next"] = cur
+        p = get(base, params); got = p.get("items") or []; items += got
+        cur = cursor(p.get("link") or {})
+        if not cur or not got: return items, True
+        time.sleep(0.22 if RS else 0.55)
+    if (end - start) <= timedelta(hours=1) or depth >= 6:
+        return items, False  # dense hour: keep what we have and flag incomplete
+    mid = start + (end - start) / 2
+    mid = mid.replace(minute=0, second=0, microsecond=0) if (end - start) > timedelta(hours=1) else mid
+    if mid <= start or mid >= end: return items, False
+    a, ca = fetch_interval(base, token, mid, end, depth + 1); b, cb = fetch_interval(base, token, start, mid, depth + 1)
+    return a + b, ca and cb
+
 def main():
     contracts = requests.get(f"{URL}/rest/v1/token_contracts_v1", headers=SB, timeout=60,
         params={"select": "symbol,chain,contract_address", "confidence": "eq.high", "chain": "eq.ethereum", "limit": "500"}).json()
-    end = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0); start = end - timedelta(hours=HOURS)
-    iso = lambda d: d.strftime("%Y-%m-%dT%H:%M:%SZ")
-    hourly, whales, truncated, usd_missing_total = [], [], 0, 0
-    failed = []
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    end = datetime.fromisoformat(os.environ["END_ISO"].replace("Z", "+00:00")) if os.environ.get("END_ISO") else now
+    start = datetime.fromisoformat(os.environ["START_ISO"].replace("Z", "+00:00")) if os.environ.get("START_ISO") else end - timedelta(hours=HOURS)
+    n_hours = int((end - start).total_seconds() // 3600); chunk = timedelta(days=1)
+    truncated_hours = failed_n = whale_n = hourly_n = miss_n = 0; failed = []; t0 = time.time()
     for c in contracts:
         try:
             base = f"https://api.routescan.io/v2/network/mainnet/evm/{CHAIN_ID[c['chain']]}/erc20-transfers"
-            params = {"tokenAddress": c["contract_address"], "timestampFrom": iso(start), "timestampTo": iso(end), "sort": "desc", "limit": 100}
-            items, cur, complete = [], None, False
-            for _ in range(MAX_PAGES):
-                if cur: params["next"] = cur
-                p = get(base, params); got = p.get("items") or []; items += got
-                cur = cursor(p.get("link") or {})
-                if not cur or not got: complete = True; break
-                time.sleep(0.22 if RS else 0.55)
-            if not complete: truncated += 1
-            buckets = {}
-            for it in items:
-                ts = datetime.fromisoformat(it["timestamp"].replace("Z", "+00:00")); h = ts.replace(minute=0, second=0, microsecond=0)
-                b = buckets.setdefault(h, {"n": 0, "vol": 0.0, "wn": 0, "wv": 0.0, "snd": set(), "rcv": set(), "miss": 0})
-                usd = it.get("amountInUsd"); b["n"] += 1; b["snd"].add(it["from"]); b["rcv"].add(it["to"])
-                if usd is None or usd == "": b["miss"] += 1; continue
-                usd = float(usd); b["vol"] += usd
-                if usd >= WHALE_USD:
-                    b["wn"] += 1; b["wv"] += usd
-                    dec = it.get("tokenDecimals"); amt = float(it["amount"]) / 10 ** int(dec) if dec is not None and it.get("amount") else None
-                    whales.append({"chain": c["chain"], "tx_hash": it["txHash"], "event_index": int(it.get("logIndex") or 0), "symbol": c["symbol"],
-                                   "block_time_utc": ts.isoformat(), "from_address": it["from"], "to_address": it["to"], "amount_token": amt, "amount_usd": usd})
-            for k in range(HOURS):
-                h = start + timedelta(hours=k); b = buckets.get(h, {"n": 0, "vol": 0.0, "wn": 0, "wv": 0.0, "snd": set(), "rcv": set(), "miss": 0})
-                usd_missing_total += b["miss"]
+            buckets, hour_complete = {}, {}
+            cs = start
+            while cs < end:
+                ce = min(cs + chunk, end)
+                items, complete = fetch_interval(base, c["contract_address"], cs, ce)
+                for it in items:
+                    ts = datetime.fromisoformat(it["timestamp"].replace("Z", "+00:00")); h = ts.replace(minute=0, second=0, microsecond=0)
+                    b = buckets.setdefault(h, {"n": 0, "vol": 0.0, "wn": 0, "wv": 0.0, "snd": set(), "rcv": set(), "miss": 0, "w": []})
+                    usd = it.get("amountInUsd"); b["n"] += 1; b["snd"].add(it["from"]); b["rcv"].add(it["to"])
+                    if usd is None or usd == "": b["miss"] += 1; continue
+                    usd = float(usd); b["vol"] += usd
+                    if usd >= WHALE_USD:
+                        b["wn"] += 1; b["wv"] += usd
+                        dec = it.get("tokenDecimals"); amt = float(it["amount"]) / 10 ** int(dec) if dec is not None and it.get("amount") else None
+                        b["w"].append({"chain": c["chain"], "tx_hash": it["txHash"], "event_index": int(it.get("logIndex") or 0), "symbol": c["symbol"],
+                                       "block_time_utc": ts.isoformat(), "from_address": it["from"], "to_address": it["to"], "amount_token": amt, "amount_usd": usd})
+                k = cs
+                while k < ce: hour_complete[k] = complete; k += timedelta(hours=1)
+                cs = ce
+            hourly, whales = [], []
+            for k in range(n_hours):
+                h = start + timedelta(hours=k)
+                b = buckets.get(h, {"n": 0, "vol": 0.0, "wn": 0, "wv": 0.0, "snd": set(), "rcv": set(), "miss": 0, "w": []})
+                miss_n += b["miss"]; whales += b["w"]
+                ok = hour_complete.get(h, True); truncated_hours += (not ok)
                 hourly.append({"symbol": c["symbol"], "chain": c["chain"], "hour_utc": h.isoformat(), "transfer_count": b["n"], "volume_usd": b["vol"],
                                "whale_count": b["wn"], "whale_volume_usd": b["wv"], "unique_senders": len(b["snd"]), "unique_receivers": len(b["rcv"]),
-                               "usd_missing_count": b["miss"], "complete": complete})
+                               "usd_missing_count": b["miss"], "complete": ok})
+            post("onchain_token_hourly_v1", hourly, "symbol,chain,hour_utc")
+            if whales: post("onchain_whale_transfers_v1", whales, "chain,tx_hash,event_index")
+            hourly_n += len(hourly); whale_n += len(whales)
         except Exception as exc:
             failed.append(f"{c['symbol']}/{c['chain']}: {str(exc)[:200]}")
-    post("onchain_token_hourly_v1", hourly, "symbol,chain,hour_utc")
-    if whales: post("onchain_whale_transfers_v1", whales, "chain,tx_hash,event_index")
-    print(json.dumps({"contracts": len(contracts), "window": [iso(start), iso(end)], "hourly_rows": len(hourly), "whale_transfers": len(whales),
-                      "tokens_truncated": truncated, "transfers_without_usd": usd_missing_total, "contracts_failed": len(failed)}))
+    print(json.dumps({"contracts": len(contracts), "window": [start.isoformat(), end.isoformat()], "hourly_rows": hourly_n, "whale_transfers": whale_n,
+                      "hours_flagged_incomplete": truncated_hours, "transfers_without_usd": miss_n, "contracts_failed": len(failed), "seconds": int(time.time() - t0)}))
     for f in failed[:20]: print("FAILED", f)
     if len(failed) > len(contracts) * 0.25: raise SystemExit("too many contract failures")
 main()
