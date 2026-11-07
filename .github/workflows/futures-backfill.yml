@@ -1,0 +1,40 @@
+name: Futures Daily Backfill
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "Space-separated spot symbols (empty = all research symbols with perps)"
+        default: ""
+        type: string
+      start_date:
+        default: "2025-10-01"
+        type: string
+      end_date:
+        description: "Inclusive; empty = yesterday"
+        default: ""
+        type: string
+permissions:
+  contents: read
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/binance-prebreakout-advisor-v1
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main_scripts
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SYMBOLS: ${{ inputs.symbols }}
+          START_DATE: ${{ inputs.start_date }}
+          END_DATE: ${{ inputs.end_date }}
+        run: python main_scripts/scripts/futures_backfill.py
