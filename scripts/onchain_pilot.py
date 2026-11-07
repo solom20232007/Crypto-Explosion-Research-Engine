@@ -21,7 +21,8 @@ def get(url, params):
         r = S.get(url, params=params, headers={"apikey": RS} if RS else {}, timeout=(10, 45))
         if r.status_code == 429 or r.status_code >= 500:
             time.sleep(min(30, 2 ** i)); continue
-        r.raise_for_status(); return r.json()
+        if r.status_code >= 400: raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
+        return r.json()
     raise RuntimeError(f"Routescan kept failing: {url}")
 
 def cursor(link):
@@ -42,37 +43,43 @@ def main():
     end = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0); start = end - timedelta(hours=HOURS)
     iso = lambda d: d.strftime("%Y-%m-%dT%H:%M:%SZ")
     hourly, whales, truncated, usd_missing_total = [], [], 0, 0
+    failed = []
     for c in contracts:
-        base = f"https://api.routescan.io/v2/network/mainnet/evm/{CHAIN_ID[c['chain']]}/erc20-transfers"
-        params = {"tokenAddress": c["contract_address"], "timestampFrom": iso(start), "timestampTo": iso(end), "sort": "desc", "limit": 100}
-        items, cur, complete = [], None, False
-        for _ in range(MAX_PAGES):
-            if cur: params["next"] = cur
-            p = get(base, params); got = p.get("items") or []; items += got
-            cur = cursor(p.get("link") or {})
-            if not cur or not got: complete = True; break
-            time.sleep(0.22 if RS else 0.55)
-        if not complete: truncated += 1
-        buckets = {}
-        for it in items:
-            ts = datetime.fromisoformat(it["timestamp"].replace("Z", "+00:00")); h = ts.replace(minute=0, second=0, microsecond=0)
-            b = buckets.setdefault(h, {"n": 0, "vol": 0.0, "wn": 0, "wv": 0.0, "snd": set(), "rcv": set(), "miss": 0})
-            usd = it.get("amountInUsd"); b["n"] += 1; b["snd"].add(it["from"]); b["rcv"].add(it["to"])
-            if usd is None or usd == "": b["miss"] += 1; continue
-            usd = float(usd); b["vol"] += usd
-            if usd >= WHALE_USD:
-                b["wn"] += 1; b["wv"] += usd
-                dec = it.get("tokenDecimals"); amt = float(it["amount"]) / 10 ** int(dec) if dec is not None and it.get("amount") else None
-                whales.append({"chain": c["chain"], "tx_hash": it["txHash"], "event_index": int(it.get("logIndex") or 0), "symbol": c["symbol"],
-                               "block_time_utc": ts.isoformat(), "from_address": it["from"], "to_address": it["to"], "amount_token": amt, "amount_usd": usd})
-        for k in range(HOURS):
-            h = start + timedelta(hours=k); b = buckets.get(h, {"n": 0, "vol": 0.0, "wn": 0, "wv": 0.0, "snd": set(), "rcv": set(), "miss": 0})
-            usd_missing_total += b["miss"]
-            hourly.append({"symbol": c["symbol"], "chain": c["chain"], "hour_utc": h.isoformat(), "transfer_count": b["n"], "volume_usd": b["vol"],
-                           "whale_count": b["wn"], "whale_volume_usd": b["wv"], "unique_senders": len(b["snd"]), "unique_receivers": len(b["rcv"]),
-                           "usd_missing_count": b["miss"], "complete": complete})
+        try:
+            base = f"https://api.routescan.io/v2/network/mainnet/evm/{CHAIN_ID[c['chain']]}/erc20-transfers"
+            params = {"tokenAddress": c["contract_address"], "timestampFrom": iso(start), "timestampTo": iso(end), "sort": "desc", "limit": 100}
+            items, cur, complete = [], None, False
+            for _ in range(MAX_PAGES):
+                if cur: params["next"] = cur
+                p = get(base, params); got = p.get("items") or []; items += got
+                cur = cursor(p.get("link") or {})
+                if not cur or not got: complete = True; break
+                time.sleep(0.22 if RS else 0.55)
+            if not complete: truncated += 1
+            buckets = {}
+            for it in items:
+                ts = datetime.fromisoformat(it["timestamp"].replace("Z", "+00:00")); h = ts.replace(minute=0, second=0, microsecond=0)
+                b = buckets.setdefault(h, {"n": 0, "vol": 0.0, "wn": 0, "wv": 0.0, "snd": set(), "rcv": set(), "miss": 0})
+                usd = it.get("amountInUsd"); b["n"] += 1; b["snd"].add(it["from"]); b["rcv"].add(it["to"])
+                if usd is None or usd == "": b["miss"] += 1; continue
+                usd = float(usd); b["vol"] += usd
+                if usd >= WHALE_USD:
+                    b["wn"] += 1; b["wv"] += usd
+                    dec = it.get("tokenDecimals"); amt = float(it["amount"]) / 10 ** int(dec) if dec is not None and it.get("amount") else None
+                    whales.append({"chain": c["chain"], "tx_hash": it["txHash"], "event_index": int(it.get("logIndex") or 0), "symbol": c["symbol"],
+                                   "block_time_utc": ts.isoformat(), "from_address": it["from"], "to_address": it["to"], "amount_token": amt, "amount_usd": usd})
+            for k in range(HOURS):
+                h = start + timedelta(hours=k); b = buckets.get(h, {"n": 0, "vol": 0.0, "wn": 0, "wv": 0.0, "snd": set(), "rcv": set(), "miss": 0})
+                usd_missing_total += b["miss"]
+                hourly.append({"symbol": c["symbol"], "chain": c["chain"], "hour_utc": h.isoformat(), "transfer_count": b["n"], "volume_usd": b["vol"],
+                               "whale_count": b["wn"], "whale_volume_usd": b["wv"], "unique_senders": len(b["snd"]), "unique_receivers": len(b["rcv"]),
+                               "usd_missing_count": b["miss"], "complete": complete})
+        except Exception as exc:
+            failed.append(f"{c['symbol']}/{c['chain']}: {str(exc)[:200]}")
     post("onchain_token_hourly_v1", hourly, "symbol,chain,hour_utc")
     if whales: post("onchain_whale_transfers_v1", whales, "chain,tx_hash,event_index")
     print(json.dumps({"contracts": len(contracts), "window": [iso(start), iso(end)], "hourly_rows": len(hourly), "whale_transfers": len(whales),
-                      "tokens_truncated": truncated, "transfers_without_usd": usd_missing_total}))
+                      "tokens_truncated": truncated, "transfers_without_usd": usd_missing_total, "contracts_failed": len(failed)}))
+    for f in failed[:20]: print("FAILED", f)
+    if len(failed) > len(contracts) * 0.25: raise SystemExit("too many contract failures")
 main()
