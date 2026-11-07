@@ -1,6 +1,6 @@
 """Compact on-chain pilot: per-token hourly activity + whale transfers (>= $25k) for mapped contracts.
 
-Uses Routescan's erc20-transfers endpoint filtered by tokenAddress (Ethereum, BSC). Only contracts with
+Uses Routescan's erc20-transfers endpoint filtered by tokenAddress (Ethereum only). Only contracts with
 confidence='high' in token_contracts_v1 are collected. Re-fetches the last 3 complete hours each run (idempotent upserts).
 Research indicators only: transfer direction/intent is NOT inferred.
 """
@@ -11,7 +11,7 @@ import requests
 
 URL = os.environ["SUPABASE_URL"].rstrip("/"); KEY = os.environ["SUPABASE_SECRET_KEY"]; RS = os.environ.get("ROUTESCAN_API_KEY", "")
 SB = {"apikey": KEY, "Authorization": f"Bearer {KEY}"}
-CHAIN_ID = {"ethereum": 1, "bsc": 56}
+CHAIN_ID = {"ethereum": 1}  # Routescan has no BSC index (NO_BLOCKCHAINS_FOR_PARAMS); BSC needs another provider
 WHALE_USD = 25_000
 MAX_PAGES = int(os.environ.get("MAX_PAGES", "40")); HOURS = int(os.environ.get("HOURS", "3"))
 S = requests.Session()
@@ -39,7 +39,7 @@ def post(table, rows, conflict):
 
 def main():
     contracts = requests.get(f"{URL}/rest/v1/token_contracts_v1", headers=SB, timeout=60,
-        params={"select": "symbol,chain,contract_address", "confidence": "eq.high", "chain": "in.(ethereum,bsc)", "limit": "500"}).json()
+        params={"select": "symbol,chain,contract_address", "confidence": "eq.high", "chain": "eq.ethereum", "limit": "500"}).json()
     end = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0); start = end - timedelta(hours=HOURS)
     iso = lambda d: d.strftime("%Y-%m-%dT%H:%M:%SZ")
     hourly, whales, truncated, usd_missing_total = [], [], 0, 0
