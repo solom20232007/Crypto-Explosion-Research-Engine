@@ -63,14 +63,15 @@ def episodes(top, df, target):
             "catch_rate": float(len(first) / len(start)),
             "median_delay_from_run_start_h": float(delay.median()) if len(delay) else None}
 
-def daily_topk(sub, score, target, k=5):
-    d = sub.assign(s=score).sort_values(["day", "s"], ascending=[True, False])
-    d["cw"] = d.groupby("day").sample_weight.cumsum()
-    top = d[d.cw <= k]
-    days = top.day.nunique()
-    prec = float(np.average(top[target], weights=top.sample_weight)) if len(top) else None
-    return {"k_per_day": k, "days": int(days), "weighted_precision": prec,
-            "lift": prec / float(np.average(sub[target], weights=sub.sample_weight)) if prec else None}, top
+def daily_topk(sub, score, target, k=5, universe=117):
+    """One decision per symbol per day (00:00 UTC row). Listing the top-k of `universe` symbols per day is
+    approximated by the top k/universe weighted share of the pooled 00:00 rows (per-day truncation on
+    weight-12 negatives would bias precision upward)."""
+    m = (sub.hour_utc == 0).values
+    d = sub[m]; ss = score[m]
+    if d[target].sum() < 20: return {}
+    t, top = topfrac(d, ss, k / universe, target)
+    return {"k_per_day": k, "decision_rows_weighted": float(d.sample_weight.sum()), "precision": t["precision"], "lift": t["lift"], **episodes(top, d, target)}, top
 
 def run_target(df, target):
     split = df.open_time.quantile(0.7)
@@ -91,7 +92,8 @@ def run_target(df, target):
                 r = wmetrics(sub[target], ss, sub.sample_weight)
                 for f in (0.01, 0.05):
                     t, top = topfrac(sub, ss, f, target); r[f"top{int(f*100)}pct"] = {**t, **episodes(top, sub, target)}
-                r["daily_top5"], _ = daily_topk(sub, ss, target, 5)
+                dt = daily_topk(sub, ss, target, 5)
+                r["daily_top5"] = dt[0] if dt else {}
                 res[seg] = r
             out["models"][f"{mn}|{fs_name}"] = res
             keep[f"{mn}|{fs_name}"] = s
@@ -105,22 +107,15 @@ def main():
     df = df.dropna(subset=["rel_rv24"]).reset_index(drop=True)
     Path("reports").mkdir(exist_ok=True)
     results, lines = {}, ["# Baseline models (research indicators, not trade signals)", ""]
-    lines.append("| target | model|features | segment | AUC | base | top5% lift | top5% precision | episodes caught | median delay h | daily top-5 precision | daily lift |")
+    lines.append("| target | model|features | segment | AUC | base | top5% lift | top5% precision | episodes caught | median delay h | daily top-5 precision (00:00 rows) | daily lift |")
     lines.append("|---|---|---|---|---|---|---|---|---|---|---|")
     for target in ["y_10_24", "y_25_48", "y_40_72"]:
         out, te, keep = run_target(df, target); results[target] = out
         for k, v in out["models"].items():
             for seg, r in v.items():
                 t = r["top5pct"]; d = r["daily_top5"]
-                lines.append(f"| {target} | {k} | {seg} | {r['auc']:.3f} | {r['base_rate']:.3f} | {t['lift']:.2f} | {t['precision']:.3f} | {t['episodes_caught']}/{t['episodes_in_test']} | {t['median_delay_from_run_start_h']} | {(d['weighted_precision'] or 0):.3f} | {(d['lift'] or 0):.2f} |")
-        if target == "y_10_24":
-            s = keep["gbm|base"]; d = te.assign(score=s)
-            d = d[d.day >= d.day.max() - pd.Timedelta(days=2)].sort_values(["day", "score"], ascending=[True, False])
-            d["cw"] = d.groupby("day").sample_weight.cumsum()
-            cols = ["day", "symbol", "score", "rv24", "range_24h", "vol_ratio_24", "ret_24h", "ret_72h", "dist_from_low_168", "dist_from_high_168", "market_wide", "y_10_24"]
-            d[d.cw <= 5][cols].to_csv("reports/daily_recommendations_backtest_sample.csv", index=False)
+                lines.append(f"| {target} | {k} | {seg} | {r['auc']:.3f} | {r['base_rate']:.3f} | {t['lift']:.2f} | {t['precision']:.3f} | {t['episodes_caught']}/{t['episodes_in_test']} | {t['median_delay_from_run_start_h']} | {d.get('precision',0):.3f} | {d.get('lift',0):.2f} |")
     Path("reports/baseline_models.json").write_text(json.dumps(results, indent=2))
     Path("reports/baseline_models.md").write_text("\n".join(lines))
     print("\n".join(lines))
-    print(Path("reports/daily_recommendations_backtest_sample.csv").read_text())
 main()
