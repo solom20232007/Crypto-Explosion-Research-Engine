@@ -27,5 +27,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: baseline-models-report
-          path: reports/baseline_models.*
+          path: reports/*
           retention-days: 30

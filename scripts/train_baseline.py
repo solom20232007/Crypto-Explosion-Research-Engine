@@ -38,22 +38,64 @@ def wmetrics(y, s, w):
     return {"auc": float(roc_auc_score(y, s, sample_weight=w)), "pr_auc": float(average_precision_score(y, s, sample_weight=w)),
             "base_rate": float(np.average(y, weights=w))}
 
-def topfrac(df, score, frac):
+def topfrac(df, score, frac, target):
     d = df.assign(s=score).sort_values("s", ascending=False)
     cw = d.sample_weight.cumsum() / d.sample_weight.sum()
     top = d[cw <= frac]
-    prec = np.average(top[TARGET], weights=top.sample_weight)
-    base = np.average(df[TARGET], weights=df.sample_weight)
-    rec = (top[TARGET] * top.sample_weight).sum() / (df[TARGET] * df.sample_weight).sum()
+    prec = np.average(top[target], weights=top.sample_weight)
+    base = np.average(df[target], weights=df.sample_weight)
+    rec = (top[target] * top.sample_weight).sum() / (df[target] * df.sample_weight).sum()
     return {"top_frac": frac, "precision": float(prec), "lift": float(prec / base), "recall_rows": float(rec), "false_alarm_share": float(1 - prec)}, top
 
-def episodes(top, df):
-    pos = df[df[TARGET] == 1]
-    keys = pos[["symbol", "next_onset_time"]].drop_duplicates()
-    hit = top[top[TARGET] == 1].groupby(["symbol", "next_onset_time"]).hours_to_onset.max().reset_index()
-    return {"episodes_in_test": int(len(keys)), "episodes_caught": int(len(hit)),
-            "catch_rate": float(len(hit) / max(len(keys), 1)),
-            "median_lead_hours": float(hit.hours_to_onset.median()) if len(hit) else None}
+def episodes(top, df, target):
+    """Label-episodes: maximal runs of positive rows per symbol (gap <= 72h merged).
+    Caught = at least one flagged row inside the run. delay = hours from run start to first flag
+    (0 = flagged at the earliest moment the move was within the label horizon)."""
+    pos = df[df[target] == 1][["symbol", "open_time"]].sort_values(["symbol", "open_time"]).copy()
+    if pos.empty: return {}
+    gap = pos.groupby("symbol").open_time.diff() > pd.Timedelta(hours=72)
+    pos["run"] = (gap | pos.symbol.ne(pos.symbol.shift())).cumsum()
+    start = pos.groupby("run").open_time.min()
+    fl = top[top[target] == 1][["symbol", "open_time"]].merge(pos, on=["symbol", "open_time"])
+    first = fl.groupby("run").open_time.min()
+    delay = ((first - start.loc[first.index]).dt.total_seconds() / 3600)
+    return {"episodes_in_test": int(len(start)), "episodes_caught": int(len(first)),
+            "catch_rate": float(len(first) / len(start)),
+            "median_delay_from_run_start_h": float(delay.median()) if len(delay) else None}
+
+def daily_topk(sub, score, target, k=5):
+    d = sub.assign(s=score).sort_values(["day", "s"], ascending=[True, False])
+    d["cw"] = d.groupby("day").sample_weight.cumsum()
+    top = d[d.cw <= k]
+    days = top.day.nunique()
+    prec = float(np.average(top[target], weights=top.sample_weight)) if len(top) else None
+    return {"k_per_day": k, "days": int(days), "weighted_precision": prec,
+            "lift": prec / float(np.average(sub[target], weights=sub.sample_weight)) if prec else None}, top
+
+def run_target(df, target):
+    split = df.open_time.quantile(0.7)
+    tr = df[df.open_time < split - pd.Timedelta(hours=72)]; te = df[df.open_time >= split].copy()
+    te["day"] = te.open_time.dt.floor("D")
+    out = {"target": target, "split_time": str(split), "train_rows": len(tr), "test_rows": len(te), "models": {}}
+    keep = {}
+    for fs_name, feats in {"base": BASE, "base+relative": BASE + REL}.items():
+        models = {"logistic": make_pipeline(SimpleImputer(strategy="median"), StandardScaler(), LogisticRegression(C=0.1, max_iter=2000)),
+                  "gbm": HistGradientBoostingClassifier(max_depth=4, learning_rate=0.05, max_iter=300, l2_regularization=1.0, random_state=7)}
+        for mn, m in models.items():
+            m.fit(tr[feats], tr[target], **({"logisticregression__sample_weight": tr.sample_weight} if mn == "logistic" else {"sample_weight": tr.sample_weight}))
+            s = m.predict_proba(te[feats])[:, 1]; res = {}
+            for seg, mask in {"all": np.ones(len(te), bool), "market_wide_false": (te.market_wide == 0).values,
+                              "market_wide_true": (te.market_wide == 1).values}.items():
+                sub = te[mask]; ss = s[mask]
+                if sub[target].sum() < 20: continue
+                r = wmetrics(sub[target], ss, sub.sample_weight)
+                for f in (0.01, 0.05):
+                    t, top = topfrac(sub, ss, f, target); r[f"top{int(f*100)}pct"] = {**t, **episodes(top, sub, target)}
+                r["daily_top5"], _ = daily_topk(sub, ss, target, 5)
+                res[seg] = r
+            out["models"][f"{mn}|{fs_name}"] = res
+            keep[f"{mn}|{fs_name}"] = s
+    return out, te, keep
 
 def main():
     t0 = time.time(); df = fetch(); print("rows", len(df), "fetch s", int(time.time() - t0))
@@ -61,35 +103,24 @@ def main():
     for c in BASE + REL + ["sample_weight"]: df[c] = pd.to_numeric(df[c], errors="coerce")
     for c in ["y_10_24", "y_25_48", "y_40_72", "y_any", "market_wide", "in_cooldown"]: df[c] = df[c].astype(int)
     df = df.dropna(subset=["rel_rv24"]).reset_index(drop=True)
-    split = df.open_time.quantile(0.7)
-    tr = df[df.open_time < split - pd.Timedelta(hours=72)]; te = df[df.open_time >= split]
-    out = {"target": TARGET, "split_time": str(split), "train_rows": len(tr), "test_rows": len(te), "models": {}}
-    sets = {"base": BASE, "base+relative": BASE + REL}
-    for fs_name, feats in sets.items():
-        models = {"logistic": make_pipeline(SimpleImputer(strategy="median"), StandardScaler(), LogisticRegression(C=0.1, max_iter=2000)),
-                  "gbm": HistGradientBoostingClassifier(max_depth=4, learning_rate=0.05, max_iter=300, l2_regularization=1.0, random_state=7)}
-        for mn, m in models.items():
-            m.fit(tr[feats], tr[TARGET], **({"logisticregression__sample_weight": tr.sample_weight} if mn == "logistic" else {"sample_weight": tr.sample_weight}))
-            s = m.predict_proba(te[feats])[:, 1]
-            res = {}
-            for seg, mask in {"all": np.ones(len(te), bool), "market_wide_false": (te.market_wide == 0).values,
-                              "market_wide_true": (te.market_wide == 1).values, "not_in_cooldown": (te.in_cooldown == 0).values}.items():
-                sub = te[mask]; ss = s[mask]
-                if sub[TARGET].sum() < 20: continue
-                r = wmetrics(sub[TARGET], ss, sub.sample_weight)
-                for f in (0.01, 0.05, 0.10):
-                    t, top = topfrac(sub, ss, f); r[f"top{int(f*100)}pct"] = {**t, **episodes(top, sub)}
-                res[seg] = r
-            out["models"][f"{mn}|{fs_name}"] = res
-            print(mn, fs_name, json.dumps(res.get("all", {}))[:300])
     Path("reports").mkdir(exist_ok=True)
-    Path("reports/baseline_models.json").write_text(json.dumps(out, indent=2))
-    lines = ["# Baseline models (indicators only, not trade signals)", f"target={TARGET}, split={split}", ""]
-    lines.append("| model|features | segment | AUC | PR-AUC | base | top5% lift | top5% precision | episodes caught | median lead h |")
-    lines.append("|---|---|---|---|---|---|---|---|---|")
-    for k, v in out["models"].items():
-        for seg, r in v.items():
-            t = r["top5pct"]; lines.append(f"| {k} | {seg} | {r['auc']:.3f} | {r['pr_auc']:.3f} | {r['base_rate']:.3f} | {t['lift']:.2f} | {t['precision']:.3f} | {t['episodes_caught']}/{t['episodes_in_test']} | {t['median_lead_hours']} |")
+    results, lines = {}, ["# Baseline models (research indicators, not trade signals)", ""]
+    lines.append("| target | model|features | segment | AUC | base | top5% lift | top5% precision | episodes caught | median delay h | daily top-5 precision | daily lift |")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|---|")
+    for target in ["y_10_24", "y_25_48", "y_40_72"]:
+        out, te, keep = run_target(df, target); results[target] = out
+        for k, v in out["models"].items():
+            for seg, r in v.items():
+                t = r["top5pct"]; d = r["daily_top5"]
+                lines.append(f"| {target} | {k} | {seg} | {r['auc']:.3f} | {r['base_rate']:.3f} | {t['lift']:.2f} | {t['precision']:.3f} | {t['episodes_caught']}/{t['episodes_in_test']} | {t['median_delay_from_run_start_h']} | {(d['weighted_precision'] or 0):.3f} | {(d['lift'] or 0):.2f} |")
+        if target == "y_10_24":
+            s = keep["gbm|base"]; d = te.assign(score=s)
+            d = d[d.day >= d.day.max() - pd.Timedelta(days=2)].sort_values(["day", "score"], ascending=[True, False])
+            d["cw"] = d.groupby("day").sample_weight.cumsum()
+            cols = ["day", "symbol", "score", "rv24", "range_24h", "vol_ratio_24", "ret_24h", "ret_72h", "dist_from_low_168", "dist_from_high_168", "market_wide", "y_10_24"]
+            d[d.cw <= 5][cols].to_csv("reports/daily_recommendations_backtest_sample.csv", index=False)
+    Path("reports/baseline_models.json").write_text(json.dumps(results, indent=2))
     Path("reports/baseline_models.md").write_text("\n".join(lines))
+    print("\n".join(lines))
+    print(Path("reports/daily_recommendations_backtest_sample.csv").read_text())
 main()
-print(Path("reports/baseline_models.md").read_text())
