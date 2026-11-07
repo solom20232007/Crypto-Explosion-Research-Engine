@@ -118,4 +118,5 @@ def main():
     Path("reports/baseline_models.json").write_text(json.dumps(results, indent=2))
     Path("reports/baseline_models.md").write_text("\n".join(lines))
     print("\n".join(lines))
-main()
+if __name__ == "__main__":
+    main()
