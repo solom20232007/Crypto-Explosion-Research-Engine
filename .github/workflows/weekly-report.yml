@@ -20,5 +20,5 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          python scripts/weekly_report.py | tee report.md
+          { python scripts/weekly_report.py; echo; python scripts/paper_trade_report.py; } | tee report.md
           gh issue create --repo "$GITHUB_REPOSITORY" --title "تقرير الأداء الأسبوعي $(date -u +%F)" --body-file report.md
