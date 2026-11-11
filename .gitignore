@@ -8,3 +8,14 @@ models/*
 !models/.gitkeep
 reports/*
 !reports/.gitkeep
+
+# run outputs (never commit)
+crypto-research-first-test/
+reports/*
+!reports/.gitkeep
+models/*
+!models/.gitkeep
+data/*
+!data/.gitkeep
+*.joblib
+*.csv.gz
