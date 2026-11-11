@@ -1,4 +1,6 @@
-"""Leakage-aware temporal baseline training for the research engine.
+"""DEPRECATED (foundation-stage baseline). Daily recommendations use scripts/daily_recommendations.py.
+
+Leakage-aware temporal baseline training for the research engine.
 
 This model is for historical research only. It does not execute trades or
 produce live alerts.

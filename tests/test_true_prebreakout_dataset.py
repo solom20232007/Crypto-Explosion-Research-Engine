@@ -27,9 +27,9 @@ def make_klines(anchor, highs, lows, closes):
 
 def test_labels_pump_like_reversal():
     anchor = 1_700_000_000_000
-    highs = [100, 101, 103, 108, 112] + [104] * 19 + [103] * 24
-    lows = [99, 100, 101, 104, 102] + [101] * 19 + [100] * 24
-    closes = [100, 100, 102, 106, 103] + [102] * 19 + [101] * 24
+    highs = [100, 101, 103, 108, 112] + [104] * 19 + [103] * 48
+    lows = [99, 100, 101, 104, 102] + [101] * 19 + [100] * 48
+    closes = [100, 100, 102, 106, 103] + [102] * 19 + [101] * 48
     result = label_future(make_klines(anchor, highs, lows, closes), anchor)
     assert result["label"] == "pump_like_reversal"
     assert result["target_10pct_24h"] is True
