@@ -121,5 +121,5 @@ def main():
     r = summarize("g_8_24", 5, d[d.qv24 >= 1e6], "أفضل 5 - سيولة >=1M فقط"); rows.append(r) if r else None
     print(pd.DataFrame(rows).to_string(index=False))
     x = d[d.rk <= 5].dropna(subset=["g_8_24"]); print("\nإجمالي قبل التكاليف (أفضل 5، +8س/24س): متوسط %.2f%% | بعد التكاليف: %.2f%% | متوسط التكلفة %.2f%%" % (x.g_8_24.mean() * 100, (x.g_8_24 - x.cost).mean() * 100, x.cost.mean() * 100))
-    print("أسوأ 1% من الصفقات (أفضل 5، صافي): %.1f%% | أفضل 1%%: %.1f%%" % (np.percentile(x.g_8_24 - x.cost, 1) * 100, np.percentile(x.g_8_24 - x.cost, 99) * 100))
+    print("أسوأ 1%% من الصفقات (أفضل 5، صافي): %.1f%% | أفضل 1%%: %.1f%%" % (np.percentile(x.g_8_24 - x.cost, 1) * 100, np.percentile(x.g_8_24 - x.cost, 99) * 100))
 main()
