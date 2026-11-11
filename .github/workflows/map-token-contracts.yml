@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: research/binance-prebreakout-advisor-v1
+          ref: main
       - uses: actions/checkout@v4
         with:
           ref: main

@@ -34,7 +34,7 @@ jobs:
       - name: Checkout research implementation
         uses: actions/checkout@v4
         with:
-          ref: research/binance-prebreakout-advisor-v1
+          ref: main
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

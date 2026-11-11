@@ -1,0 +1,181 @@
+"""Historical surge discovery for small Binance Spot USDT altcoins."""
+# Research-only scanner; no live trading or order placement.
+import argparse, json, time
+from pathlib import Path
+import pandas as pd
+import requests
+BASES=("https://data-api.binance.vision","https://api.binance.com")
+EXCLUDED={"BTC","ETH","SOL","USDT","USDC","FDUSD","TUSD","USDP","DAI","BUSD","USDE","USDD","EUR","TRY","BRL","GBP","AUD","BIDR","IDRT","UAH","RUB","ZAR","PLN","RON","ARS","JPY"}
+COLS=["open_time","open","high","low","close","volume","close_time","quote_volume","trade_count","taker_buy_base_volume","taker_buy_quote_volume","ignore"]
+def get_json(path,params=None):
+    last=None
+    for base in BASES:
+        for attempt in range(4):
+            try:
+                r=requests.get(base+path,params=params,timeout=30)
+                if r.status_code==451: last=requests.HTTPError("HTTP 451",response=r); break
+                if r.status_code in (418,429): time.sleep(max(int(r.headers.get("Retry-After",2**attempt)),1)); continue
+                r.raise_for_status(); return r.json()
+            except (requests.RequestException,ValueError) as e:
+                last=e
+                if attempt<3: time.sleep(2**attempt)
+    raise last or RuntimeError("Binance endpoints unavailable")
+def discover_target_symbols(info):
+    out=[]
+    for x in info.get("symbols",[]):
+        base=str(x.get("baseAsset","")).upper(); sym=str(x.get("symbol","")).upper()
+        if x.get("status")!="TRADING" or x.get("quoteAsset")!="USDT" or not x.get("isSpotTradingAllowed",True): continue
+        if base in EXCLUDED or base.endswith(("UP","DOWN","BULL","BEAR")) or any(t in base for t in ("2L","2S","3L","3S","5L","5S")): continue
+        if sym.endswith("USDT"): out.append(sym)
+    return sorted(set(out))
+def fetch_klines(symbol,interval,start_ms,end_ms,pause=.08):
+    rows=[]; cursor=start_ms; step=3600000 if interval=="1h" else 86400000
+    while cursor<end_ms:
+        p=get_json("/api/v3/klines",{"symbol":symbol,"interval":interval,"startTime":cursor,"endTime":end_ms-1,"limit":1000})
+        if not p: break
+        rows.extend(p); nxt=int(p[-1][0])+step
+        if nxt<=cursor: break
+        cursor=nxt
+        if len(p)<1000: break
+        time.sleep(max(0,pause))
+    if not rows: return pd.DataFrame(columns=COLS)
+    f=pd.DataFrame(rows,columns=COLS).drop_duplicates("open_time").sort_values("open_time")
+    for c in ("open_time","open","high","low","close","volume","quote_volume","trade_count"): f[c]=pd.to_numeric(f[c],errors="coerce")
+    return f.dropna(subset=["open_time","close","high"])
+def detect_surge_events(daily,symbol,early_1d_pct=10,confirmed_1d_pct=15,confirmed_2d_pct=25,confirmed_3d_pct=40):
+    """Detect early 10% moves and stronger 1d/2d/3d surge confirmations.
+
+    Daily high thresholds capture intraday excursions; close thresholds are
+    retained separately as stronger close-confirmed variants. The 2d/3d
+    windows use rolling daily highs and the close from 2/3 sessions earlier.
+    """
+    if daily.empty: return pd.DataFrame()
+    f=daily.copy().sort_values("open_time").reset_index(drop=True)
+    for c in ("open","high","low","close","volume","quote_volume"): f[c]=pd.to_numeric(f[c],errors="coerce")
+    prev=f.close.shift(1)
+    f["daily_close_change_pct"]=(f.close/prev-1)*100
+    f["daily_high_change_pct"]=(f.high/prev-1)*100
+    f["two_day_high_change_pct"]=(f.high.rolling(2,min_periods=2).max()/f.close.shift(2)-1)*100
+    f["two_day_close_change_pct"]=(f.close/f.close.shift(2)-1)*100
+    f["three_day_high_change_pct"]=(f.high.rolling(3,min_periods=3).max()/f.close.shift(3)-1)*100
+    f["three_day_close_change_pct"]=(f.close/f.close.shift(3)-1)*100
+    f["volume_change_1d_pct"]=(f.volume/f.volume.shift(1)-1)*100
+    tests={
+      "early_surge_1d_high":f.daily_high_change_pct>=early_1d_pct,
+      "early_surge_1d_close":f.daily_close_change_pct>=early_1d_pct,
+      "confirmed_1d_high":f.daily_high_change_pct>=confirmed_1d_pct,
+      "confirmed_1d_close":f.daily_close_change_pct>=confirmed_1d_pct,
+      "confirmed_2d_high":f.two_day_high_change_pct>=confirmed_2d_pct,
+      "confirmed_2d_close":f.two_day_close_change_pct>=confirmed_2d_pct,
+      "confirmed_3d_high":f.three_day_high_change_pct>=confirmed_3d_pct,
+      "confirmed_3d_close":f.three_day_close_change_pct>=confirmed_3d_pct,
+    }
+    mask=pd.Series(False,index=f.index)
+    for v in tests.values(): mask|=v.fillna(False)
+    r=f.loc[mask].copy()
+    if r.empty: return pd.DataFrame()
+    r["symbol"]=symbol
+    r["event_date_utc"]=pd.to_datetime(r.open_time,unit="ms",utc=True).dt.strftime("%Y-%m-%d")
+    r["trigger_types"]=[",".join(k for k,v in tests.items() if bool(v.loc[i])) for i in r.index]
+    numeric=("daily_close_change_pct","daily_high_change_pct","two_day_high_change_pct","two_day_close_change_pct",
+             "three_day_high_change_pct","three_day_close_change_pct","volume_change_1d_pct")
+    for c in numeric: r[c]=r[c].round(4)
+    return r[["symbol","event_date_utc","open_time","open","high","low","close","volume","quote_volume",
+      "daily_high_change_pct","daily_close_change_pct","two_day_high_change_pct","two_day_close_change_pct",
+      "three_day_high_change_pct","three_day_close_change_pct","volume_change_1d_pct","trigger_types"]].reset_index(drop=True)
+def summarize_context(hourly,symbol,date):
+    if hourly.empty: return {"symbol":symbol,"event_date_utc":date,"hourly_rows":0}
+    f=hourly.copy()
+    for c in ("open_time","close","high","low","quote_volume"): f[c]=pd.to_numeric(f[c],errors="coerce")
+    t=int(pd.Timestamp(date,tz="UTC").timestamp()*1000); pre=f[f.open_time<t].sort_values("open_time").copy(); last=pre.tail(24); prior=pre.tail(72).head(48)
+    # Hourly indicators use pre-event candles only; no event-day or post-event bars enter.
+    close = pd.to_numeric(pre["close"], errors="coerce")
+    ema9 = close.ewm(span=9, adjust=False, min_periods=9).mean()
+    ema21 = close.ewm(span=21, adjust=False, min_periods=21).mean()
+    ema_spread = ema9 - ema21
+    macd_line = close.ewm(span=12, adjust=False).mean() - close.ewm(span=26, adjust=False).mean()
+    macd_signal = macd_line.ewm(span=9, adjust=False).mean()
+    macd_hist = macd_line - macd_signal
+    delta = close.diff()
+    avg_gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+    avg_loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+    rsi = 100 - 100 / (1 + avg_gain / avg_loss.replace(0, float("nan")))
+    ema_cross = (ema_spread > 0) & (ema_spread.shift(1) <= 0)
+    macd_cross = (macd_hist > 0) & (macd_hist.shift(1) <= 0)
+    def hours_since(mask):
+        hits = pre.loc[mask.fillna(False), "open_time"]
+        return round((t - float(hits.iloc[-1])) / 3600000, 2) if len(hits) else None
+    taker_ratio = None
+    if {"taker_buy_quote_volume", "quote_volume"}.issubset(pre.columns):
+        qv = pd.to_numeric(last["quote_volume"], errors="coerce").sum()
+        tb = pd.to_numeric(last["taker_buy_quote_volume"], errors="coerce").sum()
+        taker_ratio = round(float(tb / qv), 5) if qv > 0 else None
+    a=last.quote_volume.mean() if len(last) else float("nan"); b=prior.quote_volume.mean() if len(prior) else float("nan")
+    return {"symbol":symbol,"event_date_utc":date,"hourly_rows":len(f),
+      "pre_event_24h_return_pct":round((last.close.iloc[-1]/last.close.iloc[0]-1)*100,4) if len(last)>1 else None,
+      "pre_event_72h_return_pct":round((pre.close.iloc[-1]/pre.close.iloc[-min(72,len(pre))]-1)*100,4) if len(pre)>1 else None,
+      "pre_event_24h_range_pct":round((last.high.max()/last.low.min()-1)*100,4) if len(last) and last.low.min()>0 else None,
+      "pre_event_quote_volume_24h":round(float(last.quote_volume.sum()),4) if len(last) else None,
+      "pre_event_volume_ratio_24h_vs_prior48h":round(float(a/b),4) if pd.notna(a) and pd.notna(b) and b>0 else None,
+      "hourly_ema9_21_bullish_crosses_72h":int(ema_cross.tail(72).fillna(False).sum()),
+      "hours_since_last_ema9_21_bullish_cross":hours_since(ema_cross),
+      "hourly_macd_bullish_crosses_72h":int(macd_cross.tail(72).fillna(False).sum()),
+      "hours_since_last_macd_bullish_cross":hours_since(macd_cross),
+      "hourly_macd_histogram_last":round(float(macd_hist.iloc[-1]),8) if len(macd_hist) and pd.notna(macd_hist.iloc[-1]) else None,
+      "hourly_rsi14_last":round(float(rsi.iloc[-1]),4) if len(rsi) and pd.notna(rsi.iloc[-1]) else None,
+      "hourly_ema9_vs_ema21_pct_last":round(float((ema9.iloc[-1]/ema21.iloc[-1]-1)*100),5) if len(ema21) and pd.notna(ema21.iloc[-1]) and ema21.iloc[-1] else None,
+      "taker_buy_quote_ratio_24h":taker_ratio}
+def run_scan(start,end,out_dir,max_symbols=None,max_events=250,min_quote_volume_usdt=100000,pause_seconds=.08):
+    start=pd.Timestamp(start); end=pd.Timestamp(end)
+    start=start.tz_localize("UTC") if start.tzinfo is None else start.tz_convert("UTC")
+    end=end.tz_localize("UTC") if end.tzinfo is None else end.tz_convert("UTC")
+    if end<=start: raise ValueError("--end must be later than --start")
+    out_dir.mkdir(parents=True,exist_ok=True); symbols=discover_target_symbols(get_json("/api/v3/exchangeInfo"))
+    if max_symbols is not None:
+        if max_symbols<1: raise ValueError("--max-symbols must be positive")
+        symbols=symbols[:max_symbols]
+    a,b=int(start.timestamp()*1000),int(end.timestamp()*1000); events=[]; daily_parts=[]; failures=[]
+    for i,sym in enumerate(symbols,1):
+        try:
+            d=fetch_klines(sym,"1d",a,b,pause_seconds);
+            if not d.empty:
+                d.insert(0,"symbol",sym); daily_parts.append(d)
+            e=detect_surge_events(d,sym)
+            if not e.empty: e=e[e.quote_volume>=min_quote_volume_usdt]; events.extend(e.to_dict("records"))
+            print(json.dumps({"progress":f"{i}/{len(symbols)}","symbol":sym,"daily_rows":len(d),"events":len(e),"status":"ok"}))
+        except Exception as exc:
+            failures.append({"symbol":sym,"error":f"{type(exc).__name__}: {exc}"}); print(json.dumps({"symbol":sym,"status":"error","error":str(exc)}))
+        time.sleep(max(0,pause_seconds))
+    ev=pd.DataFrame(events,columns=["symbol","event_date_utc","open_time","open","high","low","close","volume","quote_volume","daily_high_change_pct","daily_close_change_pct","two_day_high_change_pct","two_day_close_change_pct","three_day_high_change_pct","three_day_close_change_pct","volume_change_1d_pct","trigger_types"])
+    if not ev.empty: ev=ev.sort_values(["daily_high_change_pct","three_day_high_change_pct","two_day_high_change_pct","daily_close_change_pct"],ascending=False)
+    ep=out_dir/"surge_events.csv"; ev.to_csv(ep,index=False); daily_path=out_dir/"daily_candles.csv"; (pd.concat(daily_parts,ignore_index=True) if daily_parts else pd.DataFrame(columns=["symbol"]+COLS)).to_csv(daily_path,index=False); selected=ev.head(max(1,max_events)) if not ev.empty else ev
+    hourly_parts=[]; contexts=[]; hfail=[]
+    for i,x in enumerate(selected.to_dict("records"),1):
+        sym,date=x["symbol"],x["event_date_utc"]; t=int(pd.Timestamp(date,tz="UTC").timestamp()*1000)
+        try:
+            h=fetch_klines(sym,"1h",t-72*3600000,t+24*3600000,pause_seconds)
+            if not h.empty: h.insert(0,"event_date_utc",date); h.insert(0,"event_symbol",sym); hourly_parts.append(h)
+            contexts.append(summarize_context(h,sym,date))
+        except Exception as exc: hfail.append({"symbol":sym,"event_date_utc":date,"error":str(exc)})
+        if i%25==0: print(json.dumps({"hourly_context_progress":f"{i}/{len(selected)}"}))
+    hp=out_dir/"surge_event_hourly_context.csv"; (pd.concat(hourly_parts,ignore_index=True) if hourly_parts else pd.DataFrame()).to_csv(hp,index=False)
+    context=pd.DataFrame(contexts)
+    if not context.empty:
+        cols=["symbol","event_date_utc","daily_high_change_pct","daily_close_change_pct","two_day_high_change_pct","two_day_close_change_pct","three_day_high_change_pct","three_day_close_change_pct","trigger_types"]
+        context=selected[cols].merge(context,on=["symbol","event_date_utc"],how="left")
+    cp=out_dir/"surge_pre_event_context.csv"; context.to_csv(cp,index=False)
+    summary={"requested_start_utc":start.isoformat(),"requested_end_exclusive_utc":end.isoformat(),
+      "universe":"currently active Binance Spot USDT pairs excluding BTC/ETH/SOL, stablecoins and leveraged tokens",
+      "survivorship_bias_warning":"Current exchangeInfo omits delisted pairs; this first pass may miss historical winners that were later delisted.",
+      "symbols_scanned":len(symbols),"symbols_with_errors":len(failures),"event_rows":len(ev),
+      "selected_events_with_hourly_context":len(selected),"minimum_event_quote_volume_usdt":min_quote_volume_usdt,
+      "thresholds_pct":{"early_surge_1d":10,"confirmed_1d":15,"confirmed_2d":25,"confirmed_3d":40},"threshold_method":"Daily high and close variants are recorded separately; 2d/3d use rolling daily highs or closes versus the close 2/3 sessions earlier.",
+      "failed_symbols":failures,"hourly_context_failures":hfail,"daily_candle_rows":sum(len(x) for x in daily_parts),"outputs":[str(daily_path),str(ep),str(hp),str(cp)]}
+    (out_dir/"surge_scan_summary.json").write_text(json.dumps(summary,indent=2),encoding="utf-8")
+    print(json.dumps(summary,indent=2)); return summary
+def main():
+    p=argparse.ArgumentParser(description=__doc__); p.add_argument("--start",default="2023-10-28T00:00:00Z"); p.add_argument("--end",default="2026-10-28T00:00:00Z")
+    p.add_argument("--out-dir",type=Path,default=Path("reports/surge_scan")); p.add_argument("--max-symbols",type=int,default=None)
+    p.add_argument("--max-events",type=int,default=250); p.add_argument("--min-quote-volume-usdt",type=float,default=100000); p.add_argument("--pause-seconds",type=float,default=.08)
+    x=p.parse_args(); run_scan(x.start,x.end,x.out_dir,x.max_symbols,x.max_events,x.min_quote_volume_usdt,x.pause_seconds)
+if __name__=="__main__": main()
