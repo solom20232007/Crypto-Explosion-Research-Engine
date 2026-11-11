@@ -1,0 +1,694 @@
+{
+ "BTC": [
+  "Bitcoin",
+  "BTC"
+ ],
+ "ETH": [
+  "Ethereum",
+  "Ether"
+ ],
+ "SOL": [
+  "Solana"
+ ],
+ "BNB": [
+  "BNB",
+  "Binance Coin"
+ ],
+ "XRP": [
+  "XRP",
+  "Ripple"
+ ],
+ "ADA": [
+  "Cardano"
+ ],
+ "DOGE": [
+  "Dogecoin"
+ ],
+ "AVAX": [
+  "Avalanche"
+ ],
+ "LINK": [
+  "Chainlink"
+ ],
+ "DOT": [
+  "Polkadot"
+ ],
+ "TRX": [
+  "TRON"
+ ],
+ "LTC": [
+  "Litecoin"
+ ],
+ "BCH": [
+  "Bitcoin Cash"
+ ],
+ "TON": [
+  "Toncoin",
+  "The Open Network"
+ ],
+ "NEAR": [
+  "NEAR Protocol"
+ ],
+ "ARB": [
+  "Arbitrum"
+ ],
+ "OP": [
+  "Optimism"
+ ],
+ "SUI": [
+  "Sui Network"
+ ],
+ "APT": [
+  "Aptos"
+ ],
+ "UNI": [
+  "Uniswap"
+ ],
+ "AAVE": [
+  "Aave"
+ ],
+ "ATOM": [
+  "Cosmos",
+  "Cosmos Hub"
+ ],
+ "ETC": [
+  "Ethereum Classic"
+ ],
+ "FIL": [
+  "Filecoin"
+ ],
+ "ICP": [
+  "Internet Computer"
+ ],
+ "INJ": [
+  "Injective"
+ ],
+ "MKR": [
+  "MakerDAO",
+  "Sky Protocol"
+ ],
+ "RENDER": [
+  "Render Network"
+ ],
+ "FET": [
+  "Fetch.ai",
+  "Artificial Superintelligence Alliance"
+ ],
+ "SEI": [
+  "Sei Network"
+ ],
+ "TIA": [
+  "Celestia"
+ ],
+ "JUP": [
+  "Jupiter"
+ ],
+ "PEPE": [
+  "Pepe"
+ ],
+ "SHIB": [
+  "Shiba Inu"
+ ],
+ "WIF": [
+  "dogwifhat"
+ ],
+ "BONK": [
+  "Bonk"
+ ],
+ "1000CAT": [
+  "Simon's Cat"
+ ],
+ "AERO": [
+  "Aerodrome"
+ ],
+ "AI": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Sleepless AI"
+   ]
+  }
+ ],
+ "ALPINE": [
+  "Alpine F1"
+ ],
+ "ALT": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "AltLayer"
+   ]
+  }
+ ],
+ "AMP": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Amp token"
+   ]
+  }
+ ],
+ "AR": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Arweave"
+   ]
+  }
+ ],
+ "ASTER": [
+  "Aster DEX"
+ ],
+ "AT": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "APRO"
+   ]
+  }
+ ],
+ "AVA": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Travala"
+   ]
+  }
+ ],
+ "BANK": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Lorenzo Protocol"
+   ]
+  }
+ ],
+ "BAT": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Basic Attention Token"
+   ]
+  }
+ ],
+ "BEAMX": [
+  "Beam"
+ ],
+ "BIO": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Bio Protocol"
+   ]
+  }
+ ],
+ "BLUR": [
+  "Blur NFT",
+  "Blur marketplace"
+ ],
+ "BMT": [
+  "Bubblemaps"
+ ],
+ "BOME": [
+  "Book of Meme"
+ ],
+ "CAKE": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "PancakeSwap"
+   ]
+  }
+ ],
+ "CELO": [
+  "Celo"
+ ],
+ "CFG": [
+  "Centrifuge"
+ ],
+ "CHIP": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "USD.AI"
+   ]
+  }
+ ],
+ "COTI": [
+  "COTI"
+ ],
+ "COW": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "CoW Protocol",
+    "CoW Swap"
+   ]
+  }
+ ],
+ "CRV": [
+  "Curve DAO",
+  "Curve Finance"
+ ],
+ "CVX": [
+  "Convex Finance"
+ ],
+ "CYBER": [
+  "CyberConnect",
+  "Cyber L2"
+ ],
+ "DASH": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Dash coin"
+   ]
+  }
+ ],
+ "DEXE": [
+  "DeXe"
+ ],
+ "DODO": [
+  "DODO DEX"
+ ],
+ "EIGEN": [
+  "EigenLayer",
+  "EigenCloud"
+ ],
+ "ERA": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Caldera"
+   ]
+  }
+ ],
+ "ETHFI": [
+  "Ether.fi",
+  "EtherFi"
+ ],
+ "FF": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Falcon Finance"
+   ]
+  }
+ ],
+ "FLOKI": [
+  "Floki Inu",
+  "FLOKI"
+ ],
+ "FOGO": [
+  "Fogo"
+ ],
+ "FORM": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Four.meme"
+   ]
+  }
+ ],
+ "GIGGLE": [
+  "Giggle Academy",
+  "Giggle Fund"
+ ],
+ "GRAM": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Gram"
+   ]
+  }
+ ],
+ "GTC": [
+  "Gitcoin"
+ ],
+ "G": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Gravity chain"
+   ]
+  }
+ ],
+ "HAEDAL": [
+  "Haedal"
+ ],
+ "HOT": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Holo",
+    "Holochain"
+   ]
+  }
+ ],
+ "HUMA": [
+  "Huma Finance"
+ ],
+ "INIT": [
+  "Initia"
+ ],
+ "JASMY": [
+  "JasmyCoin",
+  "Jasmy"
+ ],
+ "JST": [
+  "JUST DeFi",
+  "JUST network"
+ ],
+ "JTO": [
+  "Jito"
+ ],
+ "KAT": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Katana network"
+   ]
+  }
+ ],
+ "KITE": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Kite AI"
+   ]
+  }
+ ],
+ "KMNO": [
+  "Kamino"
+ ],
+ "LDO": [
+  "Lido DAO",
+  "Lido Finance"
+ ],
+ "LSK": [
+  "Lisk"
+ ],
+ "LUNC": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Terra Luna Classic",
+    "Luna Classic"
+   ]
+  }
+ ],
+ "MARSCOIN": [
+  "Marscoin"
+ ],
+ "MEGA": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "MegaETH"
+   ]
+  }
+ ],
+ "MET": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Meteora"
+   ]
+  }
+ ],
+ "MITO": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Mitosis"
+   ]
+  }
+ ],
+ "MORPHO": [
+  "Morpho"
+ ],
+ "MUBARAK": [
+  "Mubarak"
+ ],
+ "NIGHT": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Midnight network"
+   ]
+  }
+ ],
+ "NIL": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Nillion"
+   ]
+  }
+ ],
+ "NOM": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Onomy"
+   ]
+  }
+ ],
+ "OGN": [
+  "Origin Protocol"
+ ],
+ "ONDO": [
+  "Ondo Finance"
+ ],
+ "ONE": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Harmony ONE",
+    "Harmony protocol"
+   ]
+  }
+ ],
+ "PARTI": [
+  "Particle Network"
+ ],
+ "PENDLE": [
+  "Pendle"
+ ],
+ "PENGU": [
+  "Pudgy Penguins",
+  "Pengu"
+ ],
+ "PHA": [
+  "Phala"
+ ],
+ "PLUME": [
+  "Plume network"
+ ],
+ "POL": [
+  "Polygon"
+ ],
+ "PROM": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Prom token"
+   ]
+  }
+ ],
+ "PROVE": [
+  "Succinct"
+ ],
+ "PUMP": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Pump.fun",
+    "pumpfun"
+   ]
+  }
+ ],
+ "PYTH": [
+  "Pyth Network"
+ ],
+ "QNT": [
+  "Quant Network",
+  "Overledger"
+ ],
+ "RAD": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Radworks",
+    "Radicle"
+   ]
+  }
+ ],
+ "RAY": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Raydium"
+   ]
+  }
+ ],
+ "RED": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "RedStone"
+   ]
+  }
+ ],
+ "REZ": [
+  "Renzo"
+ ],
+ "RLC": [
+  "iExec"
+ ],
+ "RSR": [
+  "Reserve Rights"
+ ],
+ "RUNE": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "THORChain"
+   ]
+  }
+ ],
+ "SAGA": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Saga protocol"
+   ]
+  }
+ ],
+ "SAND": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "The Sandbox"
+   ]
+  }
+ ],
+ "SKY": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Sky Protocol",
+    "MakerDAO"
+   ]
+  }
+ ],
+ "SOLV": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Solv Protocol"
+   ]
+  }
+ ],
+ "SOPH": [
+  "Sophon"
+ ],
+ "STRK": [
+  "Starknet"
+ ],
+ "STX": [
+  "Stacks"
+ ],
+ "SUPER": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "SuperVerse"
+   ]
+  }
+ ],
+ "S": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Sonic Labs"
+   ]
+  }
+ ],
+ "SXT": [
+  "Space and Time"
+ ],
+ "TAO": [
+  "Bittensor"
+ ],
+ "THE": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Thena"
+   ]
+  }
+ ],
+ "TRUMP": [
+  "TRUMP memecoin",
+  "Official Trump"
+ ],
+ "T": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Threshold Network"
+   ]
+  }
+ ],
+ "TUT": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Tutorial token"
+   ]
+  }
+ ],
+ "VIRTUAL": [
+  "Virtuals Protocol"
+ ],
+ "WLFI": [
+  "World Liberty Financial"
+ ],
+ "W": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Wormhole"
+   ]
+  }
+ ],
+ "XPL": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Plasma chain"
+   ]
+  }
+ ],
+ "XTZ": [
+  "Tezos"
+ ],
+ "ZAMA": [
+  "Zama"
+ ],
+ "ZEN": [
+  {
+   "ticker": "cashtag_only",
+   "aliases": [
+    "Horizen"
+   ]
+  }
+ ],
+ "ZK": [
+  "ZKsync"
+ ],
+ "ZRO": [
+  "LayerZero"
+ ]
+}

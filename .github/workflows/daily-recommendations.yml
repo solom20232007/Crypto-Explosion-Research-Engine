@@ -14,7 +14,7 @@ jobs:
       - name: Checkout collector code (research branch)
         uses: actions/checkout@v4
         with:
-          ref: research/binance-prebreakout-advisor-v1
+          ref: main
           path: research
       - uses: actions/setup-python@v5
         with:
