@@ -1,3 +1,5 @@
+"""DEPRECATED (foundation-stage analysis: 15% threshold, overlapping 24h events). Not used by the daily recommendations.
+"""
 
 from pathlib import Path
 import json

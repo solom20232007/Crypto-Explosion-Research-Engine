@@ -1,6 +1,6 @@
 """Daily research indicators (NOT buy/sell signals).
 
-Trains logistic models on prebreakout_samples_v1 (all rows, base features), builds the same features for the
+Trains logistic models on history_daily_v1 (3y of 00:00 UTC rows, base features), builds the same features for the
 latest 00:00 UTC bar of every research symbol from the candles table, and upserts ranked results to
 daily_recommendations_v1. Probabilities are population-calibrated (sample weights restore prevalence).
 """
@@ -44,10 +44,9 @@ SRC = "?"
 def train():
     global SRC
     df = fetch_all("history_daily_v1", "symbol,open_time,already_moved," + ",".join(TARGETS + BASE), "symbol,open_time")  # 3y of true-prevalence 00:00 UTC rows
-    if len(df) > 20000:
-        df = df[~df.already_moved.astype(bool)].copy(); df["sample_weight"] = 1.0; src = "history_daily_v1"
-    else:  # fallback: legacy 1y weighted hourly samples
-        df = fetch_all("prebreakout_samples_v1", "symbol,open_time,sample_weight," + ",".join(TARGETS + BASE), "symbol,open_time"); src = "prebreakout_samples_v1"
+    if len(df) <= 20000:  # no silent fallback to a different training source: a quiet change would alter the model unnoticed
+        raise SystemExit(f"history_daily_v1 has only {len(df)} rows (expected >20000); refusing to train on a different source")
+    df = df[~df.already_moved.astype(bool)].copy(); df["sample_weight"] = 1.0; src = "history_daily_v1"
     SRC = src; print("training source:", src, len(df), "rows")
     for c in BASE + ["sample_weight"]: df[c] = pd.to_numeric(df[c], errors="coerce")
     df["open_time"] = pd.to_datetime(df.open_time, utc=True)

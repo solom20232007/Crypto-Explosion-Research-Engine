@@ -175,7 +175,7 @@ def label_future(klines, anchor_ms):
         return {"label": "incomplete", "label_reason": "no_future_klines"}
     prior = klines[klines.open_time <= anchor_ms]
     future = klines[(klines.open_time >= anchor_ms) & (klines.open_time < anchor_ms + 72 * HOUR_MS)]
-    if prior.empty or len(future) < 48:
+    if prior.empty or len(future) < 72:
         return {"label": "incomplete", "label_reason": "insufficient_hourly_history"}
     base = float(prior.iloc[-1].close)
     if not np.isfinite(base) or base <= 0:
