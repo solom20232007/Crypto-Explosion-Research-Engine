@@ -1,7 +1,6 @@
 name: On-chain Pilot (mapped tokens only)
 on:
-  schedule:
-    - cron: "50 * * * *"
+  # Scheduled collection stopped 2026-11-11: 3y test showed Ethereum transfer activity adds no predictive value over price features.
   workflow_dispatch:
     inputs:
       hours:
